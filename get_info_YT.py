@@ -6,7 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 
-
+# load the environment variables
 load_dotenv()
 
 
@@ -19,7 +19,7 @@ def check_file_exists(filename):
     
 def to_rfc3339_format(date):
     """
-    Convert a datetime object to an RFC 3339 formatted date-time string.
+    convert a datetime object to an RFC 3339 formatted date-time string.
     """
     if date.tzinfo is None:
         date = date.replace(tzinfo=pytz.UTC)
@@ -296,7 +296,7 @@ class InfoYT():
 
     def get_dates(self):
         """
-        retrieve the oldest and most recent dates from the dictionary of all videos.
+        update the oldest and most recent dates from the dictionary of all videos.
         """
         dates = []
         if self.all_videos:
@@ -348,24 +348,37 @@ class InfoYT():
             #return json.load(f)
 
 
-    def update_videos(self):
+    def update_videos(self, max_result=25):
+        """
+        retrieve the most recent videos and add them to the dictionary of all videos.
+        """
 
         counter = 0
         titles = []
 
-        new_videos = self.get_recent_videos(max_result=25)
+        if self.all_videos:
             
-        for video in new_videos:
-            video_id = video['video_id']
-            if video_id not in self.all_videos:
-                self.all_videos[video_id] = video
-                counter += 1
-                titles.append(video['title'])
+            new_videos = self.get_recent_videos(max_result=max_result)
             
+            for video in new_videos:
+                video_id = video['video_id']
+                if video_id not in self.all_videos:
+                    self.all_videos[video_id] = video
+                    counter += 1
+                    titles.append(video['title'])
+            # the dictionary of all videos has been updated, now update the oldest and most recent dates
+            self.get_dates()
+            
+            print(f"I've found {counter} new videos to be added!")
+            if counter>0:
+                print(f'Here are the titles of the new videos:')
+                for title in titles:
+                    print(f'{title}')
+            
+            if counter==25:
+                print('There are more than 25 new videos. \
+                      You can run the update_videos method again with max_result up to 50 to retrieve more.')
 
-        print(f"I've found {counter} new videos to be added!")
-        if counter>0:
-            print(f'Here are the titles of the new videos:')
-            for title in titles:
-                print(f'{title}')
+        else:
+            print('No videos have been retrieved yet. Please run the get_all_videos method first.')
 
