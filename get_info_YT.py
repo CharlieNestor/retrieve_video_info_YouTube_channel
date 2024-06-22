@@ -41,7 +41,7 @@ def extract_channel_id(url):
 
 def get_channel_id_from_url(youtube, url):
     """
-    retrieves the channel ID from a YouTube URL.
+    retrieves the channel ID and channel username from a YouTube URL.
     """
 
     # try to extract video ID
@@ -107,7 +107,7 @@ def get_channel_id_from_url(youtube, url):
 
 def extract_timestamps(description):
     """
-    extracts timestamps and their corresponding subtitles from the video description if present.
+    extracts timestamps and their corresponding subtitles from the video description, if present.
     """
     timestamp_pattern = re.compile(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*([^\n]*)')    # matches MM:SS or HH:MM:SS followed by subtitles
     matches = timestamp_pattern.findall(description)
@@ -127,6 +127,11 @@ today_str = to_rfc3339_format(today_dt)
 
 
 class InfoYT():
+    """
+    this class retrieves information about a YouTube channel and its videos.
+    input: a YouTube channel URL
+    output: information about the channel and its videos
+    """
 
     def __init__(self, url) -> None:
 
@@ -135,12 +140,16 @@ class InfoYT():
         self.channel_username = channel_username
         self.num_videos = self.get_video_count(youtube)
         self.all_videos = self.load_from_json() if self.check_history() else None
+        if self.all_videos:
+            self.get_dates()
+        self.get_info()
 
 
     def get_info(self) -> None:
         """
         print information regarding the current channel
         """
+        print('')
         print(f'The username for this channel is: {self.channel_username}.')
         print(f'The channel id is: {self.channel_id}')
         print(f'The number of video published by this channel is: {self.num_videos}.')
@@ -155,16 +164,15 @@ class InfoYT():
 
     def check_history(self) -> bool:
         """
-        check if a file with the channel's videos already exists.
+        check if a file with the channel's videos already exists in the Channel_Videos folder.
         """
-
         filename = self.channel_username.replace(' ','')+'_videos.json'
         folder_path = 'Channel_Videos'
         file_path = os.path.join(folder_path, filename) 
 
         if os.path.exists(folder_path):
             if os.path.isfile(file_path):
-                print(f"The file {filename} already exists.")
+                print(f"We already have history record for this channel in file {filename}.")
                 return True
             else:
                 print(f"The file {filename} doesn't exist yet in the {folder_path}/ folder. \nThere is no history record for this channel.")
@@ -180,7 +188,6 @@ class InfoYT():
         """
         retrieve the total number of videos of a YouTube channel.
         """
-        
         # fetch channel details
         request = youtube.channels().list(
             part="statistics",
