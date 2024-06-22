@@ -9,13 +9,6 @@ from googleapiclient.discovery import build
 # load the environment variables
 load_dotenv()
 
-
-def check_file_exists(filename):
-    """
-    check if a file exists in the current directory.
-    """
-    return os.path.exists(filename)
-
     
 def to_rfc3339_format(date):
     """
@@ -165,7 +158,7 @@ class InfoYT():
         check if a file with the channel's videos already exists.
         """
 
-        filename = self.channel_username.replace(' ','_')+'_videos.json'
+        filename = self.channel_username.replace(' ','')+'_videos.json'
         folder_path = 'Channel_Videos'
         file_path = os.path.join(folder_path, filename) 
 
@@ -174,8 +167,7 @@ class InfoYT():
                 print(f"The file {filename} already exists.")
                 return True
             else:
-                print(f"The file {filename} doesn't exist yet in the {folder_path}/ folder. \
-                      There is no history record for this channel.")
+                print(f"The file {filename} doesn't exist yet in the {folder_path}/ folder. \nThere is no history record for this channel.")
                 return False
         else:
             # create the folder if it doesn't exist
@@ -216,10 +208,12 @@ class InfoYT():
             publishedBefore = date,
             maxResults=max_result,      # max requests are 50
             order="date",
+            type='video'
         )
         response = request.execute()
         
         for item in response['items']:
+            print(item)
             if item['id']['kind'] == 'youtube#video':
                 video_id = item['id']['videoId']
                 video_info = youtube.videos().list(
@@ -227,6 +221,7 @@ class InfoYT():
                     id=video_id
                 ).execute()
                 for video in video_info['items']:
+                    print(video)
                     description = video['snippet']['description']
                     video_data = {
                         'video_id': video['id'],
@@ -260,8 +255,8 @@ class InfoYT():
                 
         elif len(self.all_videos)<0.9*self.num_videos:
             self.get_dates()
-            print(f'The number of videos already retrieved is {len(self.all_videos)}. \n\
-                    This download will retrieve the remaining {self.num_videos-len(self.all_videos)} videos.')
+            print(f'The number of videos already retrieved is {len(self.all_videos)}. \nThis download will \
+                  retrieve the remaining {self.num_videos-len(self.all_videos)} videos.')
             published_before = to_rfc3339_format(self.oldest_date)
         else:
             print('All the videos in the channel have already been retrieved!')
@@ -360,7 +355,7 @@ class InfoYT():
         """
         saves a dictionary to a JSON file in a specific folder.
         """
-        filename = self.channel_username.replace(' ','_')+'_videos.json'
+        filename = self.channel_username.replace(' ','')+'_videos.json'
         folder_path = 'Channel_Videos'
         file_path = os.path.join(folder_path, filename)
 
@@ -373,7 +368,7 @@ class InfoYT():
         """
         loads a dictionary from a JSON file in a specific folder.
         """
-        filename = self.channel_username.replace(' ','_')+'_videos.json'
+        filename = self.channel_username.replace(' ','')+'_videos.json'
         folder_path = 'Channel_Videos'
         file_path = os.path.join(folder_path, filename) 
         with open(file_path, 'r') as f:
@@ -407,7 +402,7 @@ class InfoYT():
                 for title in titles:
                     print(f'{title}')
             
-            if counter==25:
+            if counter==max_result:
                 print('There are more than 25 new videos. \
                       You can run the update_videos method again with max_result up to 50 to retrieve more.')
 
