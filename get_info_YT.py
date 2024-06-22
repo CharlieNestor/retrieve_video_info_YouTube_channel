@@ -141,20 +141,29 @@ class InfoYT():
         self.channel_id = channel_id
         self.channel_username = channel_username
         self.num_videos = self.get_video_count(youtube)
-        self.all_videos = None
+        self.all_videos = self.load_from_json() if self.check_history() else None
 
 
-    def get_info(self):
+    def get_info(self) -> None:
         """
         print information regarding the current channel
         """
-
         print(f'The username for this channel is: {self.channel_username}.')
         print(f'The channel id is: {self.channel_id}')
         print(f'The number of video published by this channel is: {self.num_videos}.')
+        if self.all_videos:
+            print(f'The number of videos already retrieved is: {len(self.all_videos)}')
+            self.get_dates()
+            if self.oldest_date:
+                print(f'The oldest video was published on: {self.oldest_date}')
+            if self.most_recent_date:
+                print(f'The most recent video was published on: {self.most_recent_date}')
 
 
-    def check_history(self):
+    def check_history(self) -> bool:
+        """
+        check if a file with the channel's videos already exists.
+        """
 
         filename = self.channel_username.replace(' ','_')+'_videos.json'
         folder_path = 'Channel_Videos'
@@ -175,7 +184,7 @@ class InfoYT():
             return False
         
     
-    def get_video_count(self, youtube=youtube):
+    def get_video_count(self, youtube=youtube) -> int:
         """
         retrieve the total number of videos of a YouTube channel.
         """
@@ -231,20 +240,32 @@ class InfoYT():
 
         return videos
     
-    def get_all_videos(self, max_videos=200, youtube=youtube):
+    def get_all_videos(self, max_videos=200, youtube=youtube) -> None:
         """
         retrieve video information for ALL the videos of one YouTube channel.
+        due to API limits it will retrieve only a default maximum of 200 videos.
         """
         videos = []
         next_page_token = None
+        published_before = today_str
 
-        if self.num_videos>max_videos:
-            reply = input(f'The number of videos in this channel is {self.num_videos}. \
-                            This download will retrieve only {max_videos} videos. You can overwrite this \
-                            by setting the parameter max_videos to whatever you desire, but be mindful of \
-                            the YouTube API limit. Want to proceed? Y/N')
-            if reply.lower()=='n':
-                return None
+        if not self.all_videos:
+            if self.num_videos>max_videos:
+                reply = input(f'The number of videos in this channel is {self.num_videos}.\nThis download will \
+                                retrieve only {max_videos} videos. You can overwrite this \
+                                by setting the parameter max_videos to whatever you desire, but be mindful of \
+                                the YouTube API limit. Want to proceed? Y/N')
+                if reply.lower()=='n':
+                    return None
+                
+        elif len(self.all_videos)<0.9*self.num_videos:
+            self.get_dates()
+            print(f'The number of videos already retrieved is {len(self.all_videos)}. \n\
+                    This download will retrieve the remaining {self.num_videos-len(self.all_videos)} videos.')
+            published_before = to_rfc3339_format(self.oldest_date)
+        else:
+            print('All the videos in the channel have already been retrieved!')
+            return None
         
         counter = 0
         while True:
@@ -253,6 +274,7 @@ class InfoYT():
                 channelId=self.channel_id,
                 maxResults=26,      # 50 is the maximum allowed by API
                 order="date",
+                publishedBefore=published_before,
                 pageToken = next_page_token,
             )
             response = request.execute()
@@ -284,13 +306,24 @@ class InfoYT():
             next_page_token = response.get('nextPageToken')
             if not next_page_token:
                 break
+        if self.all_videos:
+            if (len(videos) + len(self.all_videos)) >= 0.95*self.num_videos:
+                print('All the videos in the channel have been retrieved!')
+        else:
+            if len(videos) >= 0.95*self.num_videos:
+                print('All the videos in the channel have been retrieved!')
 
-        if len(videos)>=0.95*self.num_videos:
-            print('All the videos in the channel have been retrieved!')
-
-        videos_dict = {item['video_id']: item for item in videos}
-
-        self.all_videos = videos_dict
+        if not self.all_videos:
+            videos_dict = {item['video_id']: item for item in videos}
+            self.all_videos = videos_dict
+        else:
+            for video in videos:
+                video_id = video['video_id']
+                if video_id not in self.all_videos:
+                    self.all_videos[video_id] = video
+            # the dictionary of all videos has been updated, now update the oldest and most recent dates
+        
+        self.get_dates()
         #return videos
 
 
@@ -344,15 +377,14 @@ class InfoYT():
         folder_path = 'Channel_Videos'
         file_path = os.path.join(folder_path, filename) 
         with open(file_path, 'r') as f:
-            self.all_videos = json.load(f)
-            #return json.load(f)
+            #self.all_videos = json.load(f)
+            return json.load(f)
 
 
     def update_videos(self, max_result=25):
         """
         retrieve the most recent videos and add them to the dictionary of all videos.
         """
-
         counter = 0
         titles = []
 
