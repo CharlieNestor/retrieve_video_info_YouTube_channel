@@ -2,7 +2,7 @@ import re
 import os
 import json
 import pytz
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union
 from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
@@ -100,7 +100,7 @@ def extract_timestamps(description:str) -> dict:
     return timestamps if timestamps else None
 
 
-def sort_videos_by_date(videos_dict:dict) -> dict:
+def sort_videos_by_date(videos_dict: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """
     sort the videos dictionary by 'published_at' field in decreasing order (most recent first).
     """
@@ -279,29 +279,6 @@ class InfoYT():
                     video['duration'] = duration
                     break
 
-        """
-        for item in response['items']:
-            print(item)
-            if item['id']['kind'] == 'youtube#video':
-                video_id = item['id']['videoId']
-                video_info = youtube.videos().list(
-                    part="snippet,contentDetails",
-                    id=video_id
-                ).execute()
-                for video in video_info['items']:
-                    print(video)
-                    description = video['snippet']['description']
-                    video_data = {
-                        'video_id': video['id'],
-                        'title': video['snippet']['title'],
-                        'published_at': video['snippet']['publishedAt'],
-                        'duration': video['contentDetails']['duration'],
-                        'description': description,
-                        'timestamps': extract_timestamps(description)
-                    }
-                    videos.append(video_data)
-        """
-
         return videos
     
     def get_all_videos(self, max_videos:int=200, youtube=youtube) -> None:
@@ -383,37 +360,6 @@ class InfoYT():
                     if video['video_id'] == video_id:
                         video['duration'] = duration
                         break
-        
-        """
-            
-            for item in response['items']:
-                if item['id']['kind'] == 'youtube#video':
-                    video_id = item['id']['videoId']
-                    video_info = youtube.videos().list(
-                        part="snippet,contentDetails",
-                        id=video_id
-                    ).execute()
-                    for video in video_info['items']:
-                        description = video['snippet']['description']
-                        video_data = {
-                            'video_id': video['id'],
-                            'title': video['snippet']['title'],
-                            'published_at': video['snippet']['publishedAt'],
-                            'duration': video['contentDetails']['duration'],
-                            'description': description,
-                            'timestamps': extract_timestamps(description)
-                        }
-                        videos.append(video_data)
-                        counter+=1
-                        if counter>max_videos:
-                            break
-            
-            if counter>max_videos:
-                break
-            next_page_token = response.get('nextPageToken')
-            if not next_page_token:
-                break
-        """
 
         if self.all_videos:
             for video in videos:
