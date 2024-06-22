@@ -2,6 +2,7 @@ import re
 import os
 import json
 import pytz
+from typing import List, Dict, Tuple, Union
 from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
@@ -10,7 +11,7 @@ from googleapiclient.discovery import build
 load_dotenv()
 
     
-def to_rfc3339_format(date) -> str:
+def to_rfc3339_format(date: datetime) -> str:
     """
     convert a datetime object to an RFC 3339 formatted date-time string.
     """
@@ -19,9 +20,9 @@ def to_rfc3339_format(date) -> str:
     return date.isoformat()
 
 
-def extract_video_id(url) -> str:
+def extract_video_id(url:str) -> Union[str, None]:
     """
-    extracts the video ID from a YouTube URL.
+    extract the video ID from a YouTube URL.
     """
     video_id_match = re.search(r'(?:v=|youtu\.be/|/v/|/embed/|/shorts/)([^\s&?]+)', url)
     if video_id_match:
@@ -29,9 +30,9 @@ def extract_video_id(url) -> str:
     return None
 
 
-def extract_channel_id(url) -> str:
+def extract_channel_id(url:str) -> Union[str, None]:
     """
-    extracts the channel ID or username from a YouTube URL.
+    extract the channel ID or username from a YouTube URL.
     """
     channel_id_match = re.search(r'(?:youtube\.com/(?:c/|channel/|user/|@))([^/?&]+)', url)
     if channel_id_match:
@@ -39,9 +40,9 @@ def extract_channel_id(url) -> str:
     return None
 
 
-def get_channel_id_from_url(youtube, url) -> tuple:
+def get_channel_id_from_url(youtube, url:str) -> tuple:
     """
-    retrieves the channel ID and channel username from a YouTube URL.
+    retrieve the channel ID and channel username from a YouTube URL.
     """
 
     # try to extract video ID
@@ -69,22 +70,6 @@ def get_channel_id_from_url(youtube, url) -> tuple:
         if channel_id_username.startswith('UC'):
             return channel_id_username, None
         else:
-            """
-            # fetch channel details using the username/custom URL
-            request = youtube.channels().list(
-                part="id",
-                forUsername=channel_id_username
-            )
-            response = request.execute()
-
-            if 'items' in response and len(response['items']) > 0:
-                channel_details = response['items'][0]
-                print(channel_details)
-                channel_id = channel_details['id']
-                channel_title = channel_details['snippet']['title']
-                return channel_id, channel_title
-            else:
-            """
             # try to fetch channel details using custom URL handling
             request = youtube.search().list(
                 part="snippet",
@@ -93,7 +78,7 @@ def get_channel_id_from_url(youtube, url) -> tuple:
                 maxResults=1
             )
             response = request.execute()
-
+            
             if 'items' in response and len(response['items']) > 0:
                 channel_details = response['items'][0]
                 channel_id = channel_details['snippet']['channelId']
@@ -105,14 +90,32 @@ def get_channel_id_from_url(youtube, url) -> tuple:
         raise ValueError("Invalid YouTube URL")
     
 
-def extract_timestamps(description) -> dict:
+def extract_timestamps(description:str) -> dict:
     """
-    extracts timestamps and their corresponding subtitles from the video description, if present.
+    extract timestamps and their corresponding subtitles from the video description, if present.
     """
     timestamp_pattern = re.compile(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*([^\n]*)')    # matches MM:SS or HH:MM:SS followed by subtitles
     matches = timestamp_pattern.findall(description)
     timestamps = {match[0]: match[1].strip() for match in matches}
     return timestamps if timestamps else None
+
+
+def sort_videos_by_date(videos_dict:dict) -> dict:
+    """
+    sort the videos dictionary by 'published_at' field in decreasing order (most recent first).
+    """
+    # Convert the dictionary to a list of tuples (video_id, video_data)
+    video_items = list(videos_dict.items())
+    
+    # Sort the list based on the 'published_at' field
+    sorted_items = sorted(
+        video_items,
+        key=lambda x: datetime.strptime(x[1]['published_at'], '%Y-%m-%dT%H:%M:%SZ'),
+        reverse=True
+    )
+    sorted_dict = dict(sorted_items)
+    
+    return sorted_dict
 
     
 
@@ -133,7 +136,7 @@ class InfoYT():
     output: information about the channel and its videos
     """
 
-    def __init__(self, url) -> None:
+    def __init__(self, url:str) -> None:
 
         channel_id, channel_username = get_channel_id_from_url(youtube, url)
         self.channel_id = channel_id
@@ -202,9 +205,38 @@ class InfoYT():
             return int(video_count)
         else:
             raise ValueError("Channel not found")
+        
+
+    def get_dates(self) -> None:
+        """
+        update the oldest and most recent dates from the dictionary of all videos.
+        """
+        dates = []
+        if self.all_videos:
+            for video_id, video_data in self.all_videos.items():
+                published_at = video_data.get('published_at')
+                if published_at:
+                    # convert the string date to a datetime object
+                    date_obj = datetime.fromisoformat(published_at.rstrip('Z'))
+                    dates.append(date_obj)
+            
+            # find the oldest and most recent dates
+            if dates:
+                oldest_date = min(dates)
+                most_recent_date = max(dates)
+                self.oldest_date = oldest_date
+                self.most_recent_date = most_recent_date
+                #return oldest_date, most_recent_date
+            else:
+                self.oldest_date = None
+                self.most_recent_date = None
+                #return None, None
+        else:
+            self.oldest_date = None
+            self.most_recent_date = None
     
 
-    def get_recent_videos(self, max_result = 15, date=today_str, youtube=youtube) -> list:
+    def get_recent_videos(self, max_result:int = 15, date=today_str, youtube=youtube) -> list:
         """
         retrieve recently uploaded video information from one YouTube channel.
         """
@@ -215,13 +247,13 @@ class InfoYT():
             channelId=self.channel_id,
             publishedBefore = date,
             maxResults=max_result,      # max requests are 50
-            order="date",
-            type='video'
+            order="date",               # order by date (other values are relevance, rating, viewCount, title)
+            type='video'                # only retrieve videos
         )
         response = request.execute()
 
         for item in response['items']:
-            print(item)
+            #print(item)
             video_data = {
                 'video_id': item['id']['videoId'],
                 'title': item['snippet']['title'],
@@ -238,7 +270,7 @@ class InfoYT():
             id=','.join(batch)
         ).execute()
         for detail in video_details['items']:
-            print(detail)
+            #print(detail)
             video_id = detail['id']
             duration = detail['contentDetails']['duration']
             # Find the corresponding video in our list and update it
@@ -272,7 +304,7 @@ class InfoYT():
 
         return videos
     
-    def get_all_videos(self, max_videos=200, youtube=youtube) -> None:
+    def get_all_videos(self, max_videos:int=200, youtube=youtube) -> None:
         """
         retrieve video information for ALL the videos of one YouTube channel.
         due to API limits this will retrieve only a default maximum of 200 videos.
@@ -399,47 +431,21 @@ class InfoYT():
         # the dictionary of all videos has been updated, now update the oldest and most recent dates
         self.get_dates()
         print(f'This download has retrieved {len(videos)} videos.')
-
-
-    def get_dates(self) -> None:
-        """
-        update the oldest and most recent dates from the dictionary of all videos.
-        """
-        dates = []
-        if self.all_videos:
-            for video_id, video_data in self.all_videos.items():
-                published_at = video_data.get('published_at')
-                if published_at:
-                    # convert the string date to a datetime object
-                    date_obj = datetime.fromisoformat(published_at.rstrip('Z'))
-                    dates.append(date_obj)
-            
-            # find the oldest and most recent dates
-            if dates:
-                oldest_date = min(dates)
-                most_recent_date = max(dates)
-                self.oldest_date = oldest_date
-                self.most_recent_date = most_recent_date
-                #return oldest_date, most_recent_date
-            else:
-                self.oldest_date = None
-                self.most_recent_date = None
-                #return None, None
-        else:
-            self.oldest_date = None
-            self.most_recent_date = None
     
 
     def save_to_json(self) -> None:
         """
         saves a dictionary to a JSON file in a specific folder.
         """
+        # Sort the videos
+        sorted_videos = sort_videos_by_date(self.all_videos)
+
         filename = self.channel_username.replace(' ','')+'_videos.json'
         folder_path = 'Channel_Videos'
         file_path = os.path.join(folder_path, filename)
 
         with open(file_path, 'w') as f:
-            json.dump(self.all_videos, f, indent=4)    # indent allows to get tab spacing
+            json.dump(sorted_videos, f, indent=4)    # indent allows to get tab spacing
             print(f"Video data has been saved to {file_path}")
 
 
@@ -455,9 +461,9 @@ class InfoYT():
             return json.load(f)
 
 
-    def update_videos(self, max_result=25) -> None:
+    def update_videos(self, max_result:int=25) -> None:
         """
-        retrieve the most recent videos and add them to the dictionary of all videos.
+        retrieves the most recent videos and adds them to the dictionary of all videos.
         """
         counter = 0
         titles = []
@@ -484,7 +490,6 @@ class InfoYT():
             if counter==max_result:
                 print('There are more than 25 new videos. \
                       You can run the update_videos method again with max_result up to 50 to retrieve more.')
-
         else:
             print('No videos have been retrieved yet. Please run the get_all_videos method first.')
 
