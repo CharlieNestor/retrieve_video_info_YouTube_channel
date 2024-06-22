@@ -1,5 +1,8 @@
 .venv/
 __pycache__/
 Channel_Videos/
+
 .env
 .python-version
+
+apply_YT.ipynb
