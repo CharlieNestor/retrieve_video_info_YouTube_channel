@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 load_dotenv()
 
     
-def to_rfc3339_format(date):
+def to_rfc3339_format(date) -> str:
     """
     convert a datetime object to an RFC 3339 formatted date-time string.
     """
@@ -19,7 +19,7 @@ def to_rfc3339_format(date):
     return date.isoformat()
 
 
-def extract_video_id(url):
+def extract_video_id(url) -> str:
     """
     extracts the video ID from a YouTube URL.
     """
@@ -29,7 +29,7 @@ def extract_video_id(url):
     return None
 
 
-def extract_channel_id(url):
+def extract_channel_id(url) -> str:
     """
     extracts the channel ID or username from a YouTube URL.
     """
@@ -39,7 +39,7 @@ def extract_channel_id(url):
     return None
 
 
-def get_channel_id_from_url(youtube, url):
+def get_channel_id_from_url(youtube, url) -> tuple:
     """
     retrieves the channel ID and channel username from a YouTube URL.
     """
@@ -105,7 +105,7 @@ def get_channel_id_from_url(youtube, url):
         raise ValueError("Invalid YouTube URL")
     
 
-def extract_timestamps(description):
+def extract_timestamps(description) -> dict:
     """
     extracts timestamps and their corresponding subtitles from the video description, if present.
     """
@@ -150,9 +150,10 @@ class InfoYT():
         print information regarding the current channel
         """
         print('')
+        print(f'INFO ABOUT THE CHANNEL:')
         print(f'The username for this channel is: {self.channel_username}.')
         print(f'The channel id is: {self.channel_id}')
-        print(f'The number of video published by this channel is: {self.num_videos}.')
+        print(f'The number of videos published by this channel is: {self.num_videos}.')
         if self.all_videos:
             print(f'The number of videos already retrieved is: {len(self.all_videos)}')
             self.get_dates()
@@ -172,7 +173,7 @@ class InfoYT():
 
         if os.path.exists(folder_path):
             if os.path.isfile(file_path):
-                print(f"We already have history record for this channel in file {filename}.")
+                print(f"We already have history record for this channel in the file {filename}.")
                 return True
             else:
                 print(f"The file {filename} doesn't exist yet in the {folder_path}/ folder. \nThere is no history record for this channel.")
@@ -203,7 +204,7 @@ class InfoYT():
             raise ValueError("Channel not found")
     
 
-    def get_recent_videos(self, max_result = 15, date=today_str, youtube=youtube):
+    def get_recent_videos(self, max_result = 15, date=today_str, youtube=youtube) -> list:
         """
         retrieve recently uploaded video information from one YouTube channel.
         """
@@ -218,7 +219,35 @@ class InfoYT():
             type='video'
         )
         response = request.execute()
-        
+
+        for item in response['items']:
+            print(item)
+            video_data = {
+                'video_id': item['id']['videoId'],
+                'title': item['snippet']['title'],
+                'published_at': item['snippet']['publishedAt'],
+                'description': item['snippet']['description'],
+                'timestamps': extract_timestamps(item['snippet']['description'])
+            }
+            videos.append(video_data)
+
+        # batch request allows to retrieve the duration of multiple videos with few/one request
+        batch = [video['video_id'] for video in videos]
+        video_details = youtube.videos().list(
+            part="contentDetails",
+            id=','.join(batch)
+        ).execute()
+        for detail in video_details['items']:
+            print(detail)
+            video_id = detail['id']
+            duration = detail['contentDetails']['duration']
+            # Find the corresponding video in our list and update it
+            for video in videos:
+                if video['video_id'] == video_id:
+                    video['duration'] = duration
+                    break
+
+        """
         for item in response['items']:
             print(item)
             if item['id']['kind'] == 'youtube#video':
@@ -239,47 +268,91 @@ class InfoYT():
                         'timestamps': extract_timestamps(description)
                     }
                     videos.append(video_data)
+        """
 
         return videos
     
     def get_all_videos(self, max_videos=200, youtube=youtube) -> None:
         """
         retrieve video information for ALL the videos of one YouTube channel.
-        due to API limits it will retrieve only a default maximum of 200 videos.
+        due to API limits this will retrieve only a default maximum of 200 videos.
         """
         videos = []
         next_page_token = None
         published_before = today_str
 
+        # check if there is a history record for this channel
         if not self.all_videos:
             if self.num_videos>max_videos:
+                # warn the user of API limits and ask for confirmation
                 reply = input(f'The number of videos in this channel is {self.num_videos}.\nThis download will \
                                 retrieve only {max_videos} videos. You can overwrite this \
                                 by setting the parameter max_videos to whatever you desire, but be mindful of \
                                 the YouTube API limit. Want to proceed? Y/N')
                 if reply.lower()=='n':
                     return None
-                
+        # check if the number of videos already retrieved is close to the total number of videos
         elif len(self.all_videos)<0.9*self.num_videos:
+            # update oldest date
             self.get_dates()
             print(f'The number of videos already retrieved is {len(self.all_videos)}. \nThis download will \
-                  retrieve the remaining {self.num_videos-len(self.all_videos)} videos.')
+                retrieve videos published before {self.oldest_date}.')
             published_before = to_rfc3339_format(self.oldest_date)
         else:
+            # the current record stores already > 90% of the videos
             print('All the videos in the channel have already been retrieved!')
             return None
         
-        counter = 0
+        # requests for videos until the maximum number of videos is reached
         while True:
             request = youtube.search().list(
                 part="snippet",
                 channelId=self.channel_id,
                 maxResults=26,      # 50 is the maximum allowed by API
                 order="date",
+                type='video',
                 publishedBefore=published_before,
                 pageToken = next_page_token,
             )
             response = request.execute()
+
+            for item in response['items']:
+                video_data = {
+                    'video_id': item['id']['videoId'],
+                    'title': item['snippet']['title'],
+                    'published_at': item['snippet']['publishedAt'],
+                    'description': item['snippet']['description'],
+                    'timestamps': extract_timestamps(item['snippet']['description'])
+                }
+                videos.append(video_data)
+            
+            # if there is no next page token, break the while loop
+            next_page_token = response.get('nextPageToken')
+            if not next_page_token or len(videos) >= max_videos:
+                break
+            # once the maximum number of videos is reached, break the while loop
+            if len(videos) >= max_videos:
+                break
+
+        # batch requests to retrieve the duration of multiple videos with few requests
+        video_ids = [video['video_id'] for video in videos]
+        for i in range(0, len(video_ids), 50):  # Process in batches of 50
+            batch = video_ids[i:i+50]
+            video_details = youtube.videos().list(
+                part="contentDetails",
+                id=','.join(batch)
+            ).execute()
+
+            for detail in video_details['items']:
+                video_id = detail['id']
+                duration = detail['contentDetails']['duration']
+                # Find the corresponding video in our list and update it
+                for video in videos:
+                    if video['video_id'] == video_id:
+                        video['duration'] = duration
+                        break
+        
+        """
             
             for item in response['items']:
                 if item['id']['kind'] == 'youtube#video':
@@ -308,28 +381,27 @@ class InfoYT():
             next_page_token = response.get('nextPageToken')
             if not next_page_token:
                 break
-        if self.all_videos:
-            if (len(videos) + len(self.all_videos)) >= 0.95*self.num_videos:
-                print('All the videos in the channel have been retrieved!')
-        else:
-            if len(videos) >= 0.95*self.num_videos:
-                print('All the videos in the channel have been retrieved!')
+        """
 
-        if not self.all_videos:
-            videos_dict = {item['video_id']: item for item in videos}
-            self.all_videos = videos_dict
-        else:
+        if self.all_videos:
             for video in videos:
                 video_id = video['video_id']
                 if video_id not in self.all_videos:
                     self.all_videos[video_id] = video
-            # the dictionary of all videos has been updated, now update the oldest and most recent dates
-        
+            if (len(videos) + len(self.all_videos)) >= 0.95*self.num_videos:
+                print('All the videos in the channel have been retrieved!')
+        else:
+            videos_dict = {item['video_id']: item for item in videos}
+            self.all_videos = videos_dict
+            if len(videos) >= 0.95*self.num_videos:
+                print('All the videos in the channel have been retrieved!')
+
+        # the dictionary of all videos has been updated, now update the oldest and most recent dates
         self.get_dates()
-        #return videos
+        print(f'This download has retrieved {len(videos)} videos.')
 
 
-    def get_dates(self):
+    def get_dates(self) -> None:
         """
         update the oldest and most recent dates from the dictionary of all videos.
         """
@@ -358,7 +430,7 @@ class InfoYT():
             self.most_recent_date = None
     
 
-    def save_to_json(self):
+    def save_to_json(self) -> None:
         """
         saves a dictionary to a JSON file in a specific folder.
         """
@@ -371,7 +443,7 @@ class InfoYT():
             print(f"Video data has been saved to {file_path}")
 
 
-    def load_from_json(self):
+    def load_from_json(self) -> dict:
         """
         loads a dictionary from a JSON file in a specific folder.
         """
@@ -383,7 +455,7 @@ class InfoYT():
             return json.load(f)
 
 
-    def update_videos(self, max_result=25):
+    def update_videos(self, max_result=25) -> None:
         """
         retrieve the most recent videos and add them to the dictionary of all videos.
         """
