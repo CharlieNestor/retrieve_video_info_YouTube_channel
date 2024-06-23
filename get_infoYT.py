@@ -2,6 +2,7 @@ import re
 import os
 import json
 import pytz
+import pandas as pd
 from typing import List, Dict, Any, Tuple, Union
 from datetime import datetime
 from dotenv import load_dotenv
@@ -418,7 +419,7 @@ class InfoYT():
             return json.load(f)
 
 
-    def update_videos(self, max_result:int=25) -> None:
+    def update_videos(self, max_result:int=25, verbose=False) -> None:
         """
         retrieves the most recent videos and adds them to the dictionary of all videos.
         """
@@ -447,6 +448,34 @@ class InfoYT():
             if counter==max_result:
                 print('There are more than 25 new videos. \
                       You can run the update_videos method again with max_result up to 50 to retrieve more.')
+            if verbose:
+                return titles
         else:
             print('No videos have been retrieved yet. Please run the get_all_videos method first.')
+
+    
+    def get_videos_dataframe(self) -> pd.DataFrame:
+        """
+        convert the all_videos dictionary to a pandas DataFrame.
+        """
+        if not self.all_videos:
+            return pd.DataFrame()
+
+        videos_list = []
+        for video_id, video_data in self.all_videos.items():
+            video_info = {
+                'video_id': video_id,
+                'title': video_data['title'],
+                'published_at': video_data['published_at'],
+                'duration': video_data.get('duration', 'N/A'),
+                'description': video_data['description'][:300] + '...' if len(video_data['description']) > 300 else video_data['description'],
+                'tags': video_data.get('tags', None),
+                'timestamps': video_data['timestamps'],              #video_data.get('timestamps', None)
+            }
+            videos_list.append(video_info)
+
+        df = pd.DataFrame(videos_list)
+        df['published_at'] = pd.to_datetime(df['published_at'])
+        df = df.sort_values('published_at', ascending=False).reset_index(drop=True)
+        return df
 
