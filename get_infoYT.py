@@ -289,7 +289,7 @@ class InfoYT():
         return videos
     
 
-    def get_all_videos(self, max_videos:int=200, youtube=youtube) -> None:
+    def get_all_videos(self, max_videos:int=200, youtube=youtube, streamlit: bool=False) -> None:
         """
         retrieve video information for ALL the videos of one YouTube channel.
         due to API limits this will retrieve only a default maximum of 200 videos.
@@ -300,6 +300,7 @@ class InfoYT():
 
         # check if there is a history record for this channel
         if not self.all_videos:
+            """
             if self.num_videos>max_videos:
                 # warn the user of API limits and ask for confirmation
                 reply = input(f'The number of videos in this channel is {self.num_videos}.\nThis download will \
@@ -308,6 +309,8 @@ class InfoYT():
                                 the YouTube API limit. Want to proceed? Y/N')
                 if reply.lower()=='n':
                     return None
+            """
+            pass
         # check if the number of videos already retrieved is close to the total number of videos
         elif len(self.all_videos)<0.9*self.num_videos:
             # update oldest date
@@ -389,6 +392,9 @@ class InfoYT():
         # the dictionary of all videos has been updated, now update the oldest and most recent dates
         self.get_dates()
         print(f'This download has retrieved {len(videos)} videos.')
+
+        if streamlit:
+            return videos
     
 
     def save_to_json(self) -> None:
@@ -419,7 +425,7 @@ class InfoYT():
             return json.load(f)
 
 
-    def update_videos(self, max_result:int=25, verbose=False) -> None:
+    def update_videos(self, max_result:int=25, streamlit: bool=False) -> None:
         """
         retrieves the most recent videos and adds them to the dictionary of all videos.
         """
@@ -448,7 +454,7 @@ class InfoYT():
             if counter==max_result:
                 print('There are more than 25 new videos. \
                       You can run the update_videos method again with max_result up to 50 to retrieve more.')
-            if verbose:
+            if streamlit:
                 return titles
         else:
             print('No videos have been retrieved yet. Please run the get_all_videos method first.')
