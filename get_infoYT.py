@@ -8,6 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 
+
 # load the environment variables
 load_dotenv()
 
@@ -41,15 +42,14 @@ def extract_channel_id(url:str) -> Union[str, None]:
     return None
 
 
-def get_channel_id_from_url(youtube, url:str) -> tuple:
+def get_channel_id_from_url(youtube, url:str) -> Tuple[str, Union[str, None]]:
     """
     retrieve the channel ID and channel username from a YouTube URL.
     """
-
     # try to extract video ID
     video_id = extract_video_id(url)
     if video_id:
-        # fetch video details using the video ID
+        # specific single request using video ID
         request = youtube.videos().list(
             part="snippet",
             id=video_id
@@ -71,11 +71,11 @@ def get_channel_id_from_url(youtube, url:str) -> tuple:
         if channel_id_username.startswith('UC'):
             return channel_id_username, None
         else:
-            # try to fetch channel details using custom URL handling
+            # try to fetch channel details using a search query
             request = youtube.search().list(
                 part="snippet",
                 q=channel_id_username,      # this is literally making a query for parameter q
-                type="channel",
+                type="channel",             # only search for channels
                 maxResults=1
             )
             response = request.execute()
@@ -91,7 +91,7 @@ def get_channel_id_from_url(youtube, url:str) -> tuple:
         raise ValueError("Invalid YouTube URL")
     
 
-def extract_timestamps(description:str) -> dict:
+def extract_timestamps(description:str) -> Dict[str, str]:
     """
     extract timestamps and their corresponding subtitles from the video description, if present.
     """
@@ -347,10 +347,7 @@ class InfoYT():
             
             # if there is no next page token, break the while loop
             next_page_token = response.get('nextPageToken')
-            if not next_page_token or len(videos) >= max_videos:
-                break
-            # once the maximum number of videos is reached, break the while loop
-            if len(videos) >= max_videos:
+            if not next_page_token or len(videos) >= max_videos or len(videos)==0:
                 break
 
         # batch requests to retrieve the duration of multiple videos with few requests
