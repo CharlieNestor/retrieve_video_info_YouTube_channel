@@ -457,6 +457,77 @@ class InfoYT():
             print('No videos have been retrieved yet. Please run the get_all_videos method first.')
 
     
+    def check_reverse_order(self, max_videos:int=200, youtube=youtube, streamlit: bool=False) -> None:
+        """
+        Retrieve video information for videos published after the oldest date we have,
+        to catch any videos that might have been missed in previous retrievals.
+        """
+        videos = []
+        next_page_token = None
+        published_after = to_rfc3339_format(self.oldest_date)
+
+        print(f'Retrieving videos published after {self.oldest_date}.')
+
+        while True:
+            request = youtube.search().list(
+                part="snippet",
+                channelId=self.channel_id,
+                maxResults=50,  # Using the maximum allowed by API
+                order="date",
+                type='video',
+                publishedAfter=published_after,
+                pageToken=next_page_token,
+            )
+            response = request.execute()
+
+            for item in response['items']:
+                video_id = item['id']['videoId']
+                if video_id not in self.all_videos:
+                    video_data = {
+                        'video_id': video_id,
+                        'title': item['snippet']['title'],
+                        'published_at': item['snippet']['publishedAt'],
+                        'description': item['snippet']['description'],
+                        'timestamps': extract_timestamps(item['snippet']['description'])
+                    }
+                    videos.append(video_data)
+
+            next_page_token = response.get('nextPageToken')
+            if not next_page_token or len(videos) >= max_videos:
+                break
+
+        # batch requests to retrieve additional details for the new videos
+        video_ids = [video['video_id'] for video in videos]
+        for i in range(0, len(video_ids), 50):
+            batch = video_ids[i:i+50]
+            video_details = youtube.videos().list(
+                part="snippet,contentDetails",
+                id=','.join(batch)
+            ).execute()
+
+            for detail in video_details['items']:
+                video_id = detail['id']
+                duration = detail['contentDetails']['duration']
+                description = detail['snippet']['description']
+                tags = detail['snippet'].get('tags')
+                for video in videos:
+                    if video['video_id'] == video_id:
+                        video['duration'] = duration
+                        video['description'] = description
+                        video['tags'] = tags
+                        video['timestamps'] = extract_timestamps(description)
+                        break
+
+        # Add new videos to self.all_videos
+        for video in videos:
+            self.all_videos[video['video_id']] = video
+
+        print(f'Retrieved {len(videos)} new videos that were previously missed.')
+
+        if streamlit:
+            return videos
+
+    
     def get_videos_dataframe(self) -> pd.DataFrame:
         """
         convert the all_videos dictionary to a pandas DataFrame.
