@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import streamlit as st
 from get_infoYT import InfoYT
 
@@ -27,7 +28,8 @@ def get_video_url(channel_username: str) -> str:
     with open(file_path, 'r') as f:
         videos_dict = json.load(f)
     video_ids = list(videos_dict.keys())
-    video_url = f"https://www.youtube.com/watch?v={video_ids[0]}"
+    idx = random.randint(0, len(video_ids)-1)
+    video_url = f"https://www.youtube.com/watch?v={video_ids[idx]}"
     return video_url
 
 
@@ -59,7 +61,7 @@ def main() -> None:
 
             st.write('##')
             # Display channel information
-            st.write('**CHANNEL INFORMATION:**')
+            st.subheader('**CHANNEL INFORMATION:**')
             st.write(f"Channel name: **{info_yt.channel_username}**")
             st.write(f"Total published videos: {info_yt.num_videos}")
             if info_yt.check_history():
@@ -81,15 +83,18 @@ def main() -> None:
             st.write('###')
             # Add a streamlit button to update the videos
             st.write('Retrieve and update the dataset with the latest videos:')
+            num_videos_to_retrieve = st.number_input("Number of videos to retrieve", min_value=1, max_value=50, value=20)
             if st.button("Update video "):
                 if info_yt.check_history():
-                    output = (info_yt.update_videos(streamlit=True))
+                    output = info_yt.update_videos(max_result=num_videos_to_retrieve, streamlit=True)
                     if len(output) > 0:
                         st.write(f"I've found {len(output)} new videos to be added!")
                         for title in output:
                             st.warning(f"New video found: {title}")
-                    info_yt.save_to_json()
-                    st.success("Videos updated and saved!")
+                        info_yt.save_to_json()
+                        st.success("Videos updated and saved!")
+                    else:
+                        st.write("No new videos found.")
                 else:
                     st.warning("No videos stored for this channel. Impossible to update.")  
 
