@@ -18,6 +18,23 @@ As someone who spends a significant amount of time on YouTube, I created this pr
 
 ## File Structure
 
-get_infoYT.py: Contains the main InfoYT class for interacting with the YouTube API and managing video data.
-infoYT_streamlit.py: Implements the Streamlit web interface for the application.
-Channel_Videos/: Directory where JSON files containing channel video data are stored.
+get_infoYT.py:          Contains the main InfoYT class for interacting with the YouTube API and managing video data.
+infoYT_streamlit.py:    Implements the Streamlit web interface for the application.
+Channel_Videos/:        Directory where JSON files containing channel video data are stored.
+
+## Usage
+
+### Setup
+- Create a project in the Google Developers Console
+- Enable the YouTube Data API v3
+- Create credentials (API Key)
+- Create a .env file in the project root and add your API key:
+```sh
+YOUTUBE_API_KEY=your_api_key_here
+```
+
+### Running the Streamlit App
+To start the Streamlit app, run the following command in the Terminal:
+```sh
+streamlit run ticker_streamlit.py
+```
