@@ -312,7 +312,7 @@ class InfoYT():
             """
             pass
         # check if the number of videos already retrieved is close to the total number of videos
-        elif len(self.all_videos)<0.9*self.num_videos:
+        elif len(self.all_videos)<0.95*self.num_videos:
             # update oldest date
             self.get_dates()
             print(f'The number of videos already retrieved is {len(self.all_videos)}. \nThis download will retrieve videos published before {self.oldest_date}.')
@@ -457,14 +457,16 @@ class InfoYT():
             print('No videos have been retrieved yet. Please run the get_all_videos method first.')
 
     
-    def check_reverse_order(self, max_videos:int=200, youtube=youtube, streamlit: bool=False) -> None:
+    def run_reverse_order(self, max_videos:int=200, youtube=youtube, streamlit: bool=False) -> None:
         """
-        Retrieve video information for videos published after the oldest date we have,
+        retrieve video information for videos published after the oldest date we have,
         to catch any videos that might have been missed in previous retrievals.
         """
         videos = []
         next_page_token = None
-        published_after = to_rfc3339_format(self.oldest_date)
+        intermediate_date = self.oldest_date + (self.most_recent_date - self.oldest_date) // 4      # you can play with this ratio
+        #publishing_date = to_rfc3339_format(self.oldest_date)
+        publishing_date = to_rfc3339_format(intermediate_date)
 
         print(f'Retrieving videos published after {self.oldest_date}.')
 
@@ -475,7 +477,8 @@ class InfoYT():
                 maxResults=50,  # Using the maximum allowed by API
                 order="date",
                 type='video',
-                publishedAfter=published_after,
+                publishedAfter=publishing_date,
+                # publishedBefore=publishing_date,
                 pageToken=next_page_token,
             )
             response = request.execute()
