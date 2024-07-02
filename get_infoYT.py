@@ -558,7 +558,7 @@ class InfoYT():
         )
         response = request.execute()
 
-        # Create a set of valid video IDs from the response
+        # create a set of valid video IDs from the response
         valid_ids = set(item['id'] for item in response.get('items', []))
 
         for video_id in video_ids_to_check:
