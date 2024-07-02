@@ -40,7 +40,7 @@ streamlit run ticker_streamlit.py
 *get_infoYT.py*: \
 Contains the main InfoYT class for interacting with the YouTube API and managing video data. \
 *infoYT_jupyter.ipynb*: \
-Jupyter Notebook showing example of usage of the methods in the InfoYT class. Useful to get familiar with the functionalities.
+Jupyter Notebook showing example of usage of the methods in the InfoYT class. Useful to get familiar with the functionalities. \
 *infoYT_streamlit.py*: \
 Implements the Streamlit web interface for the application. \
 *Channel_Videos/*: \
