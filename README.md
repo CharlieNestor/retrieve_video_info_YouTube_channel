@@ -18,15 +18,6 @@ As someone who spends a significant amount of time on YouTube, I created this pr
 - Streamlit-based web interface for easy interaction
 
 
-## File Structure
-
-*get_infoYT.py*: \
-Contains the main InfoYT class for interacting with the YouTube API and managing video data.
-*infoYT_streamlit.py*: \
-Implements the Streamlit web interface for the application.
-*Channel_Videos/*: \
-Directory where JSON files containing channel video data are stored.
-
 ## Usage
 
 ### Setup
@@ -43,3 +34,13 @@ To start the Streamlit app, run the following command in the Terminal:
 ```sh
 streamlit run ticker_streamlit.py
 ```
+
+
+## File Structure
+
+*get_infoYT.py*: \
+Contains the main InfoYT class for interacting with the YouTube API and managing video data. \
+*infoYT_streamlit.py*: \
+Implements the Streamlit web interface for the application. \
+*Channel_Videos/*: \
+Directory where JSON files containing channel video data are stored.
