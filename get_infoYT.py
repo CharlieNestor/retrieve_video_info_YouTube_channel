@@ -2,6 +2,7 @@ import re
 import os
 import json
 import pytz
+import random
 import pandas as pd
 from typing import List, Dict, Any, Tuple, Union
 from datetime import datetime
@@ -289,7 +290,7 @@ class InfoYT():
         return videos
     
 
-    def get_all_videos(self, max_videos:int=200, youtube=youtube, streamlit: bool=False) -> None:
+    def get_all_videos(self, max_videos:int=200, youtube=youtube, streamlit:bool = False) -> None:
         """
         retrieve video information for ALL the videos of one YouTube channel.
         due to API limits this will retrieve only a default maximum of 200 videos.
@@ -457,15 +458,15 @@ class InfoYT():
             print('No videos have been retrieved yet. Please run the get_all_videos method first.')
 
     
-    def run_reverse_order(self, max_videos:int=200, youtube=youtube, streamlit: bool=False) -> None:
+    def run_reverse_order(self, max_videos:int=200, youtube=youtube) -> None:
         """
         retrieve video information for videos published after the oldest date we have,
         to catch any videos that might have been missed in previous retrievals.
         """
         videos = []
         next_page_token = None
-        intermediate_date = self.oldest_date + (self.most_recent_date - self.oldest_date) // 4      # you can play with this ratio
-        #publishing_date = to_rfc3339_format(self.oldest_date)
+        intermediate_date = self.most_recent_date - (self.most_recent_date - self.oldest_date) // 5      # you can play with this ratio
+        publishing_date = to_rfc3339_format(self.oldest_date)
         publishing_date = to_rfc3339_format(intermediate_date)
 
         print(f'Retrieving videos published after {self.oldest_date}.')
@@ -477,8 +478,8 @@ class InfoYT():
                 maxResults=50,  # Using the maximum allowed by API
                 order="date",
                 type='video',
-                publishedAfter=publishing_date,
-                # publishedBefore=publishing_date,
+                #publishedAfter=publishing_date,
+                publishedBefore=publishing_date,
                 pageToken=next_page_token,
             )
             response = request.execute()
@@ -527,8 +528,52 @@ class InfoYT():
 
         print(f'Retrieved {len(videos)} new videos that were previously missed.')
 
-        if streamlit:
-            return videos
+        
+
+    def validate_video_links(self, sample_size:int = 20):
+        """
+        Randomly check a sample of video IDs to ensure they are still valid.
+        
+        :param sample_size: Number of videos to check (default 10)
+        :return: A dictionary with results of the validation
+        """
+        if not self.all_videos:
+            print("No videos loaded. Please load videos first.")
+            return
+
+        # ensure sample size is not larger than the number of videos
+        sample_size = min(sample_size, len(self.all_videos))
+
+        # select 10 most recent videos and the remaining randomly
+        recent_videos = list(self.all_videos.keys())[:10]
+        random_videos = random.sample(list(self.all_videos.keys())[10:], sample_size-len(recent_videos))
+        video_ids_to_check = recent_videos + random_videos
+
+        results = []
+
+        # use a single API call to check multiple video IDs
+        request = youtube.videos().list(
+            part="id",
+            id=','.join(video_ids_to_check)
+        )
+        response = request.execute()
+
+        # Create a set of valid video IDs from the response
+        valid_ids = set(item['id'] for item in response.get('items', []))
+
+        for video_id in video_ids_to_check:
+            if video_id not in valid_ids:
+                results.append(video_id)
+
+        if results:
+            print(f'Number of invalid video IDs: {len(results)}')
+            print('Invalid video IDs:')
+            for vid in results:
+                print(f"- {vid}")
+            print("Consider removing these from your JSON file.")
+            return results
+        else:
+            print("All video IDs are valid.")
 
     
     def get_videos_dataframe(self) -> pd.DataFrame:
