@@ -2,20 +2,20 @@
 
 ## Overview
 
-This project provides a Python-based tool for tracking and managing video information from YouTube channels. The main goal is to retrieve metadata about videos published by a specific channel and store this information in a JSON file that can be regularly updated.
+YouTube Channel Video Tracker is a powerful Python-based tool designed to streamline the process of tracking and managing video information from YouTube channels. This project offers an efficient solution for retrieving, storing, and updating metadata about videos published by specific channels, providing a solid foundation for various YouTube-related applications and analyses.
 
 ## Why This Project?
 
-As someone who spends a significant amount of time on YouTube, I created this project as a first step towards building more complex applications that utilize YouTube video information. This tool provides a foundation for easily accessing and managing YouTube channel data, which can be invaluable for content analysis, recommendation systems, or other YouTube-related projects.
+In the ever-expanding universe of YouTube content, staying on top of channel activities and video releases can be challenging. This project was born out of a passion for YouTube and a desire to create a robust foundation for more complex YouTube-centric applications. Whether you're a content creator, a data analyst, or a YouTube enthusiast, this tool provides valuable insights and data management capabilities.
 
 
-## Features
+## Key Features
 
-- Retrieve channel information from a YouTube URL
-- Fetch metadata for all videos in a channel
-- Store video information in a JSON file for easy access and updates
-- Update existing records with new videos
-- Streamlit-based web interface for easy interaction
+- **Channel Information Retrieval**: Easily extract channel details from any YouTube URL.
+- **Comprehensive Video Metadata**: Fetch and store detailed metadata for all videos in a channel.
+- **Efficient Data Storage**: Utilize JSON file format for easy access, updates, and portability.
+- **User-Friendly Interface**: Interact with the tool through an intuitive Streamlit-based web interface.
+- **Flexible API Integration**: Built on the YouTube Data API v3 for reliable and up-to-date information.
 
 
 ## Usage
@@ -36,6 +36,13 @@ streamlit run ticker_streamlit.py
 ```
 
 ## File Structure
+
+
+
+`get_infoYT.py: Core functionality for YouTube API interaction and data management.
+infoYT_jupyter.ipynb: Jupyter Notebook with usage examples and functionality demonstrations.
+infoYT_streamlit.py: Streamlit web interface implementation.
+Channel_Videos/: Storage directory for channel-specific JSON data files.
 
 *get_infoYT.py*: \
 Contains the main InfoYT class for interacting with the YouTube API and managing video data. \
