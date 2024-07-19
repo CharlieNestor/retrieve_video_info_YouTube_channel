@@ -8,7 +8,6 @@ YouTube Channel Video Tracker is a powerful Python-based tool designed to stream
 
 In the ever-expanding universe of YouTube content, staying on top of channel activities and video releases can be challenging. This project was born out of a passion for YouTube and a desire to create a robust foundation for more complex YouTube-centric applications. Whether you're a content creator, a data analyst, or a YouTube enthusiast, this tool provides valuable insights and data management capabilities.
 
-
 ## Key Features
 
 - **Channel Information Retrieval**: Easily extract channel details from any YouTube URL.
@@ -37,18 +36,7 @@ streamlit run ticker_streamlit.py
 
 ## File Structure
 
-
-
-`get_infoYT.py: Core functionality for YouTube API interaction and data management.
-infoYT_jupyter.ipynb: Jupyter Notebook with usage examples and functionality demonstrations.
-infoYT_streamlit.py: Streamlit web interface implementation.
-Channel_Videos/: Storage directory for channel-specific JSON data files.
-
-*get_infoYT.py*: \
-Contains the main InfoYT class for interacting with the YouTube API and managing video data. \
-*infoYT_jupyter.ipynb*: \
-Jupyter Notebook showing example of usage of the methods in the InfoYT class. Useful to get familiar with the functionalities. \
-*infoYT_streamlit.py*: \
-Implements the Streamlit web interface for the application. \
-*Channel_Videos/*: \
-Directory where JSON files containing channel video data are stored.
+- `get_infoYT.py`: Core functionality for YouTube API interaction and data management.
+- `infoYT_jupyter.ipynb`: Jupyter Notebook with usage examples and functionality demonstrations.
+- `infoYT_streamlit.py`: Streamlit web interface implementation.
+- `Channel_Videos/`: Storage directory for channel-specific JSON data files.
