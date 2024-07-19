@@ -17,6 +17,8 @@ load_dotenv()
 def to_rfc3339_format(date: datetime) -> str:
     """
     convert a datetime object to an RFC 3339 formatted date-time string.
+    :param date: datetime object
+    :return: RFC 3339 formatted date-time string
     """
     if date.tzinfo is None:
         date = date.replace(tzinfo=pytz.UTC)
@@ -26,6 +28,8 @@ def to_rfc3339_format(date: datetime) -> str:
 def extract_video_id(url:str) -> Union[str, None]:
     """
     extract the video ID from a YouTube URL.
+    :param url: YouTube video URL
+    :return: video ID
     """
     video_id_match = re.search(r'(?:v=|youtu\.be/|/v/|/embed/|/shorts/)([^\s&?]+)', url)
     if video_id_match:
@@ -36,6 +40,8 @@ def extract_video_id(url:str) -> Union[str, None]:
 def extract_channel_id(url:str) -> Union[str, None]:
     """
     extract the channel ID or username from a YouTube URL.
+    :param url: YouTube URL
+    :return: channel ID
     """
     channel_id_match = re.search(r'(?:youtube\.com/(?:c/|channel/|user/|@))([^/?&]+)', url)
     if channel_id_match:
@@ -46,6 +52,9 @@ def extract_channel_id(url:str) -> Union[str, None]:
 def get_channel_id_from_url(youtube, url:str) -> Tuple[str, Union[str, None]]:
     """
     retrieve the channel ID and channel username from a YouTube URL.
+    :param youtube: YouTube API client
+    :param url: YouTube URL
+    :return: channel ID and channel
     """
     # try to extract video ID
     video_id = extract_video_id(url)
@@ -95,6 +104,8 @@ def get_channel_id_from_url(youtube, url:str) -> Tuple[str, Union[str, None]]:
 def extract_timestamps(description:str) -> Dict[str, str]:
     """
     extract timestamps and their corresponding subtitles from the video description, if present.
+    :param description: video description
+    :return: dictionary of timestamps and subtitles
     """
     timestamp_pattern = re.compile(r'(\d{1,2}:\d{2}(?::\d{2})?)\s*([^\n]*)')    # matches MM:SS or HH:MM:SS followed by subtitles
     matches = timestamp_pattern.findall(description)
@@ -105,6 +116,8 @@ def extract_timestamps(description:str) -> Dict[str, str]:
 def sort_videos_by_date(videos_dict: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """
     sort the videos dictionary by 'published_at' field in decreasing order (most recent first).
+    :param videos_dict: dictionary of video data
+    :return: sorted dictionary of video data
     """
     # Convert the dictionary to a list of tuples (video_id, video_data)
     video_items = list(videos_dict.items())
@@ -194,6 +207,8 @@ class InfoYT():
     def get_video_count(self, youtube=youtube) -> int:
         """
         retrieve the total number of videos of a YouTube channel.
+        :param youtube: YouTube API client
+        :return: number of videos
         """
         # fetch channel details
         request = youtube.channels().list(
@@ -242,6 +257,10 @@ class InfoYT():
     def get_recent_videos(self, max_result:int = 15, date=today_str, youtube=youtube) -> list:
         """
         retrieve recently uploaded video information from one YouTube channel.
+        :param max_result: maximum number of videos to retrieve
+        :param date: date to retrieve videos published before
+        :param youtube: YouTube API client
+        :return: list of video information
         """
         videos = []
 
@@ -294,6 +313,9 @@ class InfoYT():
         """
         retrieve video information for ALL the videos of one YouTube channel.
         due to API limits this will retrieve only a default maximum of 200 videos.
+        :param max_videos: maximum number of videos to retrieve
+        :param youtube: YouTube API client
+        :param streamlit: boolean to return the videos for Streamlit
         """
         videos = []
         next_page_token = None
@@ -414,6 +436,7 @@ class InfoYT():
     def load_from_json(self) -> dict:
         """
         loads a dictionary from a JSON file in a specific folder.
+        :return: dictionary of video data
         """
         filename = self.channel_username.replace(' ','')+'_videos.json'
         folder_path = 'Channel_Videos'
@@ -426,6 +449,8 @@ class InfoYT():
     def update_videos(self, max_result:int=25, streamlit: bool=False) -> None:
         """
         retrieves the most recent videos and adds them to the dictionary of all videos.
+        :param max_result: maximum number of videos to retrieve
+        :param streamlit: boolean to return the titles of the new videos for Streamlit
         """
         counter = 0
         titles = []
@@ -462,6 +487,8 @@ class InfoYT():
         """
         retrieve video information for videos published after the oldest date we have,
         to catch any videos that might have been missed in previous retrievals.
+        :param max_videos: maximum number of videos to retrieve
+        :param youtube: YouTube API client
         """
         videos = []
         next_page_token = None
@@ -528,12 +555,10 @@ class InfoYT():
 
         print(f'Retrieved {len(videos)} new videos that were previously missed.')
 
-        
 
-    def validate_video_links(self, sample_size:int = 20):
+    def validate_video_links(self, sample_size:int = 20) -> Union[List[str], None]:
         """
         Randomly check a sample of video IDs to ensure they are still valid.
-        
         :param sample_size: Number of videos to check (default 10)
         :return: A dictionary with results of the validation
         """
@@ -579,6 +604,7 @@ class InfoYT():
     def get_videos_dataframe(self) -> pd.DataFrame:
         """
         convert the all_videos dictionary to a pandas DataFrame.
+        :return: DataFrame of video information
         """
         if not self.all_videos:
             return pd.DataFrame()
