@@ -3,11 +3,20 @@ import os
 import json
 import pytz
 import random
+import logging
 import pandas as pd
 from typing import List, Dict, Any, Tuple, Union
 from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
+
+
+
+# Configure logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    filename='youtube_data_tool.log')
+logger = logging.getLogger(__name__)
 
 
 # load the environment variables
@@ -56,49 +65,60 @@ def get_channel_id_from_url(youtube, url:str) -> Tuple[str, Union[str, None]]:
     :param url: YouTube URL
     :return: channel ID and channel
     """
-    # try to extract video ID
-    video_id = extract_video_id(url)
-    if video_id:
-        # specific single request using video ID
-        request = youtube.videos().list(
-            part="snippet",
-            id=video_id
-        )
-        response = request.execute()
-
-        if 'items' in response and len(response['items']) > 0:
-            video_details = response['items'][0]
-            channel_id = video_details['snippet']['channelId']
-            channel_title = video_details['snippet']['channelTitle']
-            return channel_id, channel_title
-        else:
-            raise ValueError("Video not found")
-
-    # try to extract channel ID or username
-    channel_id_username = extract_channel_id(url)
-    if channel_id_username:
-        # check if it's a channel ID (starts with 'UC') or username/custom URL
-        if channel_id_username.startswith('UC'):
-            return channel_id_username, None
-        else:
-            # try to fetch channel details using a search query
-            request = youtube.search().list(
+    try:
+        # try to extract video ID
+        video_id = extract_video_id(url)
+        if video_id:
+            # specific single request using video ID
+            request = youtube.videos().list(
                 part="snippet",
-                q=channel_id_username,      # this is literally making a query for parameter q
-                type="channel",             # only search for channels
-                maxResults=1
+                id=video_id
             )
             response = request.execute()
-            
+
             if 'items' in response and len(response['items']) > 0:
-                channel_details = response['items'][0]
-                channel_id = channel_details['snippet']['channelId']
-                channel_title = channel_details['snippet']['channelTitle']
+                video_details = response['items'][0]
+                channel_id = video_details['snippet']['channelId']
+                channel_title = video_details['snippet']['channelTitle']
+                logger.info(f"Successfully retrieved channel info for video ID: {video_id}")
                 return channel_id, channel_title
             else:
-                raise ValueError("Channel not found")
-    else:
-        raise ValueError("Invalid YouTube URL")
+                logger.warning(f"No video found for ID: {video_id}")
+                raise ValueError("Video not found")
+
+        # try to extract channel ID or username
+        channel_id_username = extract_channel_id(url)
+        if channel_id_username:
+            # check if it's a channel ID (starts with 'UC') or username/custom URL
+            if channel_id_username.startswith('UC'):
+                logger.info(f"Channel ID found: {channel_id_username}")
+                return channel_id_username, None
+            else:
+                # try to fetch channel details using a search query
+                request = youtube.search().list(
+                    part="snippet",
+                    q=channel_id_username,      # this is literally making a query for parameter q
+                    type="channel",             # only search for channels
+                    maxResults=1
+                )
+                response = request.execute()
+                
+                if 'items' in response and len(response['items']) > 0:
+                    channel_details = response['items'][0]
+                    channel_id = channel_details['snippet']['channelId']
+                    channel_title = channel_details['snippet']['channelTitle']
+                    logger.info(f"Successfully retrieved channel info for username: {channel_id_username}")
+                    return channel_id, channel_title
+                else:
+                    logger.warning(f"No channel found for username: {channel_id_username}")
+                    raise ValueError("Channel not found")
+        else:
+            logger.error(f"Invalid YouTube URL: {url}")
+            raise ValueError("Invalid YouTube URL")
+        
+    except Exception as e:
+        logger.error(f"Error in get_channel_id_from_url: {str(e)}", exc_info=True)
+        raise ValueError("Error in get_channel_id_from_url")
     
 
 def extract_timestamps(description:str) -> Dict[str, str]:
