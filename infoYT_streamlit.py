@@ -16,6 +16,7 @@ def get_existing_channels() -> list[str]:
     
     files = os.listdir(folder_path)
     channels = [f.replace('_videos.json', '') for f in files if f.endswith('_videos.json')]
+    channels = sorted(channels)
     return channels
 
 def get_video_url(channel_username: str) -> str:
