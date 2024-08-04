@@ -5,4 +5,6 @@ Channel_Videos/
 .env
 .python-version
 
+authentication_oat.ipynb
+
 youtube_data_tool.log
