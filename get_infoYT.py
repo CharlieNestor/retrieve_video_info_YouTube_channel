@@ -5,10 +5,10 @@ import pytz
 import random
 import logging
 import pandas as pd
-from typing import List, Dict, Any, Tuple, Union
 from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
+from typing import List, Dict, Any, Tuple, Union
 
 
 
@@ -282,51 +282,56 @@ class InfoYT():
         :param youtube: YouTube API client
         :return: list of video information
         """
+        logger.info(f"Retrieving {max_result} recent videos published before {date}")
         videos = []
+        try:
+            request = youtube.search().list(
+                part="snippet",
+                channelId=self.channel_id,
+                publishedBefore = date,
+                maxResults=max_result,      # max requests are 50
+                order="date",               # order by date (other values are relevance, rating, viewCount, title)
+                type='video'                # only retrieve videos
+            )
+            response = request.execute()
+            logger.info(f"Successfully retrieved {len(response['items'])} videos")
 
-        request = youtube.search().list(
-            part="snippet",
-            channelId=self.channel_id,
-            publishedBefore = date,
-            maxResults=max_result,      # max requests are 50
-            order="date",               # order by date (other values are relevance, rating, viewCount, title)
-            type='video'                # only retrieve videos
-        )
-        response = request.execute()
+            for item in response['items']:
+                #print(item)
+                video_data = {
+                    'video_id': item['id']['videoId'],
+                    'title': item['snippet']['title'],
+                    'published_at': item['snippet']['publishedAt'],
+                    'description': item['snippet']['description'],
+                    'timestamps': extract_timestamps(item['snippet']['description'])
+                }
+                videos.append(video_data)
 
-        for item in response['items']:
-            #print(item)
-            video_data = {
-                'video_id': item['id']['videoId'],
-                'title': item['snippet']['title'],
-                'published_at': item['snippet']['publishedAt'],
-                'description': item['snippet']['description'],
-                'timestamps': extract_timestamps(item['snippet']['description'])
-            }
-            videos.append(video_data)
-
-        # batch request allows to retrieve the duration of multiple videos with few/one request
-        batch = [video['video_id'] for video in videos]
-        video_details = youtube.videos().list(
-            part="snippet,contentDetails",
-            id=','.join(batch)
-        ).execute()
-        #print(video_details)
-        for detail in video_details['items']:
-            video_id = detail['id']
-            duration = detail['contentDetails']['duration']
-            description = detail['snippet']['description']
-            tags = detail['snippet']['tags'] if 'tags' in detail['snippet'] else None
-            # Find the corresponding video in our list and update it
-            for video in videos:
-                if video['video_id'] == video_id:
-                    video['duration'] = duration
-                    video['description'] = description
-                    video['tags'] = tags
-                    video['timestamps'] = extract_timestamps(description)
-                    break
-
-        return videos
+            # batch request allows to retrieve the duration of multiple videos with few/one request
+            batch = [video['video_id'] for video in videos]
+            video_details = youtube.videos().list(
+                part="snippet,contentDetails",
+                id=','.join(batch)
+            ).execute()
+            #print(video_details)
+            for detail in video_details['items']:
+                video_id = detail['id']
+                duration = detail['contentDetails']['duration']
+                description = detail['snippet']['description']
+                tags = detail['snippet']['tags'] if 'tags' in detail['snippet'] else None
+                # Find the corresponding video in our list and update it
+                for video in videos:
+                    if video['video_id'] == video_id:
+                        video['duration'] = duration
+                        video['description'] = description
+                        video['tags'] = tags
+                        video['timestamps'] = extract_timestamps(description)
+                        break
+            logger.info(f"Retrieved and processed {len(videos)} recent videos")
+            return videos
+        except Exception as e:
+            logger.error(f"Error in get_recent_videos: {str(e)}", exc_info=True)
+            raise
     
 
     def get_all_videos(self, max_videos:int=200, youtube=youtube, streamlit:bool = False) -> None:
@@ -647,3 +652,51 @@ class InfoYT():
         df = df.sort_values('published_at', ascending=False).reset_index(drop=True)
         return df
 
+
+    def get_channel_upload_playlist_id(self):
+        """
+        Get the ID of the channel's 'Uploads' playlist.
+        """
+        try:
+            request = youtube.channels().list(
+                part="contentDetails",
+                id=self.channel_id
+            )
+            response = request.execute()
+            return response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+        except Exception as e:
+            logger.error(f"Error getting upload playlist ID: {str(e)}")
+            return None
+
+
+    def get_all_video_ids(self):
+        """
+        Retrieve all video IDs from the channel's 'Uploads' playlist.
+        """
+        upload_playlist_id = self.get_channel_upload_playlist_id()
+        if not upload_playlist_id:
+            return []
+        video_ids = []
+        next_page_token = None
+
+        while True:
+            try:
+                request = youtube.playlistItems().list(
+                    part="contentDetails",
+                    playlistId=upload_playlist_id,
+                    maxResults=50,
+                    pageToken=next_page_token
+                )
+                response = request.execute()
+
+                video_ids.extend([item['contentDetails']['videoId'] for item in response['items']])
+
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token:
+                    break
+
+            except Exception as e:
+                logger.error(f"Error retrieving video IDs: {str(e)}")
+                break
+
+        return video_ids
