@@ -50,83 +50,12 @@ def create_upload_frequency_chart(df):
     max_count = chart_df['count'].max()
     y_max = math.ceil(max_count * 1.1)  # 10% higher than max, rounded up
 
-    base = alt.Chart(chart_df).encode(
-        x=alt.X('date:T', 
-                axis=alt.Axis(
-                    format='%b',
-                    labelAngle=-45,
-                    title=None,
-                    labelPadding=10,  # Increase space for labels
-                    labelBaseline='top',  # Place labels below tick marks
-                    tickSize=0  # Remove tick marks
-                ),
-                scale=alt.Scale(nice=False)
-        ),
-        y=alt.Y('count:Q', 
-                axis=alt.Axis(title='Number of Videos'),
-                scale=alt.Scale(domain=[0, y_max])
-        ),
-        color=alt.Color('year:O', 
-                        scale=alt.Scale(scheme='viridis'),
-                        legend=alt.Legend(title="Year")
-        )
-    )
-
-    bars = base.mark_bar(width=bar_width).encode(
-        tooltip=[
-            alt.Tooltip('yearmonth(date):T', title='Date', format='%B %Y'),
-            alt.Tooltip('count:Q', title='Videos', format='d')
-        ]
-    )
-
-    # Add year labels below the x-axis
-    year_labels = alt.Chart(chart_df).mark_text(
-        align='center', 
-        baseline='bottom', 
-        dy=30  # Adjust this value to position the year labels
-    ).encode(
-        x='date:T',
-        text='year:O',
-        opacity=alt.condition(
-            alt.datum.month == 'Jan',  # Only show label for January
-            alt.value(1),
-            alt.value(0)
-        )
-    )
-
-    chart = (bars + year_labels).properties(
-        width=600,
-        height=400
-    ).configure_view(
-        strokeWidth=0
-    ).configure_axis(
-        labelFontSize=12,
-        titleFontSize=14
-    )
-
-    return chart
-
-
-def create_upload_frequency_chart(df):
-    df['published_at'] = pd.to_datetime(df['published_at']).dt.tz_localize(None)
-    chart_df = df.groupby(df['published_at'].dt.to_period('M').astype(str)).size().reset_index()
-    chart_df.columns = ['date', 'count']
-    chart_df['date'] = pd.to_datetime(chart_df['date'])
-    chart_df['year'] = chart_df['date'].dt.year
-    chart_df['month'] = chart_df['date'].dt.strftime('%b')
-
-    date_range = (chart_df['date'].max() - chart_df['date'].min()).days
-    bar_width = max(1, int(600 / len(chart_df)))
-
-    max_count = chart_df['count'].max()
-    y_max = math.ceil(max_count * 1.1)  # 10% higher than max, rounded up
-
     # Determine appropriate tick count and format based on date range
     if date_range <= 365:
         tick_count = 'month'
         date_format = '%b %Y'
     elif date_range <= 365 * 2:
-        tick_count = 'quarter'
+        tick_count = {"interval":"month", "step": 3}
         date_format = '%b %Y'
     else:
         tick_count = 'year'
@@ -183,6 +112,9 @@ def main():
     
     st.title("YouTube Channel Analyzer")
 
+    # Data source selection
+    data_source = st.radio("Select data source:", ("MongoDB", "Local JSON"))
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -199,10 +131,25 @@ def main():
 
         try:
             if new_channel_url:
-                info_yt = InfoYT(new_channel_url)
+                info_yt = InfoYT(new_channel_url, data_source=data_source)
             else:
                 channel_url = get_video_url(selected_channel)
-                info_yt = InfoYT(channel_url)
+                info_yt = InfoYT(channel_url, data_source=data_source)
+
+            # Check if data is available in the selected source
+            if data_source == "MongoDB":
+                if not info_yt.db_connected:
+                    st.warning("Could not connect to MongoDB. Falling back to local JSON.")
+                    info_yt = InfoYT(new_channel_url or channel_url, data_source="Local JSON")
+                elif not info_yt.all_videos:
+                    st.warning("No data available in MongoDB. Falling back to local JSON.")
+                    # Load data from local JSON without reinitializing InfoYT
+                    info_yt.load_from_json()
+
+            if not info_yt.all_videos:
+                st.warning("No data available in local JSON either. Starting fresh.")
+            else:
+                st.info(f"Loaded {len(info_yt.all_videos)} videos from local JSON.")
 
             st.header('Channel Information')
             col1, col2, col3 = st.columns(3)
@@ -221,7 +168,7 @@ def main():
                 if st.button("Sync Videos"):
                     try:
                         info_yt.sync_videos()
-                        info_yt.save_to_json()  # Save after syncing
+                        info_yt.save_data()     # Save after syncing
                         st.success("Videos synchronized, updated, and saved!")
                     except QuotaExceededException:
                         st.warning("API quota exceeded. Sync is incomplete.")
@@ -234,7 +181,7 @@ def main():
                         try:
                             with st.spinner("Downloading video data... This may take a while."):
                                 info_yt.populate_video_data()
-                                info_yt.save_to_json()
+                                info_yt.save_data()
                             st.success("All video data downloaded and saved!")
                         except QuotaExceededException:
                             st.warning("API quota exceeded. Download is incomplete.")
