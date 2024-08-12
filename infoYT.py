@@ -2,11 +2,10 @@ import re
 import os
 import json
 import pytz
-import random
-import logging
 import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
+from logging_config import logger
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from mongo_operations import MongoOperations
@@ -16,11 +15,6 @@ from typing import List, Dict, Any, Tuple, Union
 # Load the environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    filename='youtube_data_tool.log')
-logger = logging.getLogger(__name__)
 
 # YouTube API setup
 YOUTUBE_API_SERVICE_NAME = 'youtube'
