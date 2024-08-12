@@ -277,29 +277,27 @@ class InfoYT():
             file_path = os.path.join(folder_path, filename)
             with open(file_path, 'r') as f:
                 self.all_videos = json.load(f)
-            logger.info(f"Loaded video data from {file_path}")
             print(f"Video data has been loaded from {file_path}")
+            logger.info(f"Loaded {len(self.all_videos)} videos from JSON for channel: {self.channel_username}")
         else:
-            print(f"No existing data found for channel '{self.channel_username}'.")
+            logger.info(f"No existing JSON data found for channel: {self.channel_username}")
 
 
     def load_from_db(self):
         """
         Load channel data from MongoDB.
         """
-        logger.info(f"MongoDB connection status at start of load_from_db: {self.db_connected}")
         if self.db_connected:
             channel_data = self.mongo.get_channel(self.channel_username)
             if channel_data:
-                print(f"Channel '{self.channel_username}' found in database. Loading data...")
                 db_videos = self.mongo.get_all_videos(self.channel_username)
                 for video in db_videos:
                     video_id = video.pop('_id')
                     self.all_videos[video_id] = video
                 print(f"Loaded {len(self.all_videos)} videos from the database.")
-                logger.info(f"Loaded {len(self.all_videos)} videos from the database.")
+                logger.info(f"Loaded {len(self.all_videos)} videos from MongoDB for channel: {self.channel_username}")
             else:
-                print(f"No data found in MongoDB for channel '{self.channel_username}'.")
+                logger.info(f"No data found in MongoDB for channel: {self.channel_username}")
 
 
     def initialize_new_channel(self) -> None:
@@ -314,15 +312,8 @@ class InfoYT():
             self.lazy_load = True
             self.all_video_ids = None       # Will be populated later as needed
 
-        channel_data = {
-            'channel_id': self.channel_id,
-            'channel_username': self.channel_username,
-            'num_videos': self.num_videos,
-            'oldest_date': self.oldest_date,
-            'most_recent_date': self.most_recent_date
-        }
-        if self.db_connected:
-            self.mongo.upsert_channel(channel_data)
+        self.update_dates()  # Update dates based on any existing data
+        self.sync_channel_data()
         
         print(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
         logger.info(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
@@ -345,19 +336,21 @@ class InfoYT():
             if dates:
                 self.oldest_date = min(dates)
                 self.most_recent_date = max(dates)
-                # Update the channel data in the database with the new date range
-                channel_data = {
-                    'channel_id': self.channel_id,
-                    'channel_username': self.channel_username,
-                    'num_videos': self.num_videos,
-                    'oldest_date': self.oldest_date,
-                    'most_recent_date': self.most_recent_date
-                }
-                if self.db_connected:
-                    self.mongo.upsert_channel(channel_data)
 
-                logger.info(f"Updated date range for channel {self.channel_username}: "
-                        f"oldest {self.oldest_date}, most recent {self.most_recent_date}")
+    def sync_channel_data(self) -> None:
+        """
+        Synchronize channel data with the database.
+        """
+        if self.db_connected:
+            channel_data = {
+                'channel_id': self.channel_id,
+                'channel_username': self.channel_username,
+                'num_videos': self.num_videos,
+                'oldest_date': self.oldest_date,
+                'most_recent_date': self.most_recent_date
+            }
+            self.mongo.upsert_channel(channel_data)
+            logger.info(f"Synchronized channel data for {self.channel_username}")
             
 
     def get_info(self) -> None:
@@ -480,6 +473,7 @@ class InfoYT():
             self.process_video_batch(batch)
 
         self.update_dates()
+        self.sync_channel_data()
 
     
     def process_video_batch(self, video_ids: List[str]) -> None:
@@ -531,7 +525,6 @@ class InfoYT():
         This method handles cases where we already have some videos stored.
         """
         logger.info(f"Starting video synchronization for channel: {self.channel_username}")
-        logger.info(f"MongoDB connection status at start of sync_videos: {self.db_connected}")
         
         # Get all current video IDs from the channel
         current_video_ids = set(self.get_all_video_ids())
@@ -548,26 +541,28 @@ class InfoYT():
         # Remove videos that are no longer in the channel
         for video_id in removed_video_ids:
             del self.all_videos[video_id]
-            logger.info(f"Removed video {video_id} from storage as it's no longer in the channel")
         
         # Fetch information for new videos
         if new_video_ids:
             try:
-                print(f"Fetching data for {len(new_video_ids)} new videos...")
                 self.fetch_new_videos(list(new_video_ids))
             except QuotaExceededException:
                 logger.warning("Quota exceeded during sync. Sync is incomplete.")
                 print("WARNING: YouTube API quota exceeded. Synchronization is incomplete.")
+            except Exception as e:
+                logger.error(f"Error during video synchronization: {str(e)}", exc_info=True)
         
         print(f"Video synchronization completed.")
         print(f"  - Added: {len(new_video_ids)} new videos")
         print(f"  - Removed: {len(removed_video_ids)} videos")
         print(f"  - Total videos after sync: {len(current_video_ids)}")
-        logger.info(f"Video synchronization completed. Added {len(new_video_ids)} new videos, removed {len(removed_video_ids)} videos.")
-        
+        logger.info(f"Video synchronization completed. Added: {len(new_video_ids)}, "
+                    f"Removed: {len(removed_video_ids)}, Total: {self.num_videos}")
+
         self.num_videos = len(current_video_ids)
         # Update dates after synchronization
         self.update_dates()
+        self.sync_channel_data()
 
     
     def fetch_new_videos(self, video_ids: List[str], batch_size: int = 50) -> None:
@@ -585,7 +580,7 @@ class InfoYT():
                 logger.warning(f"Quota exceeded. Processed {i} videos out of {len(video_ids)}")
                 break
             except Exception as e:
-                logger.error(f"Error processing batch: {str(e)}")
+                logger.error(f"Error processing video batch: {str(e)}", exc_info=True)
                 break
 
 
@@ -604,7 +599,7 @@ class InfoYT():
                 'title': video_data['title'],
                 'published_at': video_data['published_at'],
                 'duration': video_data.get('duration', 'N/A'),
-                'description': video_data['description'][:300] + '...' if len(video_data['description']) > 300 else video_data['description'],
+                'description': video_data['description'][:400] + '...' if len(video_data['description']) > 400 else video_data['description'],
                 'tags': video_data.get('tags', None),
                 'timestamps': video_data['timestamps'],              #video_data.get('timestamps', None)
             }
@@ -613,17 +608,15 @@ class InfoYT():
         df = pd.DataFrame(videos_list)
         df['published_at'] = pd.to_datetime(df['published_at'])
         df = df.sort_values('published_at', ascending=False).reset_index(drop=True)
+
         return df
     
 
     def save_data(self):
 
-        logger.info(f"MongoDB connection status at start of save_data: {self.db_connected}")
-
         # Sort the videos
         self.all_videos = sort_videos_by_date(self.all_videos)
 
-        print(self.db_connected)
         # Update the videos to the database
         if self.db_connected:
             self.mongo.sync_videos(self.channel_username, self.all_videos)
@@ -637,7 +630,7 @@ class InfoYT():
         with open(file_path, 'w') as f:
             json.dump(self.all_videos, f, indent=4)     # indent allows to get tab spacing
         print(f"Video data has been saved to {file_path}")
-        logger.info(f"Saved video data to {file_path}")
+        logger.info(f"Saved {len(self.all_videos)} videos to {file_path}")
             
 
     def close_connection(self):
@@ -648,7 +641,6 @@ class InfoYT():
             self.mongo.close()
             self.db_connected = False
             print("MongoDB connection closed.")
-        else:
-            print("No active MongoDB connection to close.")
+            logger.info("MongoDB connection closed.")
 
             
