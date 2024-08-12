@@ -9,6 +9,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from mongo_operations import MongoOperations
 from typing import List, Dict, Any, Tuple, Union
 
 
@@ -166,33 +167,52 @@ def sort_videos_by_date(videos_dict: Dict[str, Dict[str, Any]]) -> Dict[str, Dic
 
 class InfoYT():
     """
-    this class retrieves information about a YouTube channel and its videos.
+    This class retrieves information about a YouTube channel and its videos.
     """
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, data_source: str = "Local JSON") -> None:
         """
         Initialize the InfoYT object with a YouTube channel URL.
         :param url: YouTube channel URL
+        :param data_source: Preferred data source ("MongoDB" or "Local JSON")
         """
 
         # Initialize YouTube API client
         self.youtube = build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, developerKey=DEVELOPER_KEY)
+        # Initialize MongoDB client
+        self.mongo = None
+        self.db_connected = False
+        if data_source == "MongoDB":
+            self.mongo = MongoOperations()
+            self.db_connected = self.mongo.connect()
+            logger.info(f"Initial MongoDB connection status: {self.db_connected}")
         
         # Get channel ID and username from URL
-        channel_id, channel_username = get_channel_id_from_url(self.youtube, url)
-        self.channel_id = channel_id
-        self.channel_username = channel_username
-        self.num_videos = self.get_video_count()
-        self.all_videos = self.load_from_json() if self.check_history(verbose=True) else None
-        self.oldest_date = None
-        self.most_recent_date = None
-        # Check for existing data
-        if self.check_history(verbose=False):
-            self.update_dates()
-        else:
-            self.initialize_new_channel()
-        # Print overall channel info
-        self.get_info()
+        try:
+            channel_id, channel_username = get_channel_id_from_url(self.youtube, url)
+            self.channel_id = channel_id
+            self.channel_username = channel_username
+            self.num_videos = self.get_video_count()
+            self.all_videos = {}
+            self.most_recent_date = None
+            self.oldest_date = None
+
+            # Check if the connection to the database was successful
+            if data_source == "MongoDB" and self.db_connected:
+                self.load_from_db()
+            else:
+                self.load_from_json()
+
+            # If no data is found, initialize a new channel
+            if not self.all_videos:
+                self.initialize_new_channel()
+            
+            # Print overall channel info
+            self.get_info()
+            logger.info(f"Initialized InfoYT for channel: {self.channel_username}, Data source: {data_source}, Videos: {len(self.all_videos)}")
+        except Exception as e:
+            logger.error(f"Error initializing InfoYT: {str(e)}", exc_info=True)
+            raise
 
 
     ### INITIALIZATION METHODS
@@ -215,8 +235,6 @@ class InfoYT():
                 channel_stats = response['items'][0]['statistics']
                 video_count = channel_stats.get('videoCount')
                 return int(video_count)
-            else:
-                raise ValueError("Channel not found")
         except Exception as e:
             logger.error(f"Error in get_video_count: {str(e)}", exc_info=True)
             raise ValueError("Error in get_video_count")
@@ -251,86 +269,113 @@ class InfoYT():
 
     def load_from_json(self) -> dict:
         """
-        loads a dictionary from a JSON file in a specific folder.
-        :return: dictionary of video data
+        Load channel data from local JSON file.
         """
-        filename = self.channel_username.replace(' ','')+'_videos.json'
-        folder_path = 'Channel_Videos'
-        file_path = os.path.join(folder_path, filename) 
-        with open(file_path, 'r') as f:
+        if self.check_history(verbose=True):
+            filename = self.channel_username.replace(' ', '') + '_videos.json'
+            folder_path = 'Channel_Videos'
+            file_path = os.path.join(folder_path, filename)
+            with open(file_path, 'r') as f:
+                self.all_videos = json.load(f)
             logger.info(f"Loaded video data from {file_path}")
-            return json.load(f)
-            
+            print(f"Video data has been loaded from {file_path}")
+        else:
+            print(f"No existing data found for channel '{self.channel_username}'.")
+
+
+    def load_from_db(self):
+        """
+        Load channel data from MongoDB.
+        """
+        logger.info(f"MongoDB connection status at start of load_from_db: {self.db_connected}")
+        if self.db_connected:
+            channel_data = self.mongo.get_channel(self.channel_username)
+            if channel_data:
+                print(f"Channel '{self.channel_username}' found in database. Loading data...")
+                db_videos = self.mongo.get_all_videos(self.channel_username)
+                for video in db_videos:
+                    video_id = video.pop('_id')
+                    self.all_videos[video_id] = video
+                print(f"Loaded {len(self.all_videos)} videos from the database.")
+                logger.info(f"Loaded {len(self.all_videos)} videos from the database.")
+            else:
+                print(f"No data found in MongoDB for channel '{self.channel_username}'.")
+
+
+    def initialize_new_channel(self) -> None:
+        """
+        Initialize data for a new channel with no existing record.
+        If the channel has 500 or fewer videos, retrieve all video IDs.
+        Otherwise, set a flag for lazy loading.
+        """
+        if self.num_videos <= 500:
+            self.all_video_ids = self.get_all_video_ids()
+        else:
+            self.lazy_load = True
+            self.all_video_ids = None       # Will be populated later as needed
+
+        channel_data = {
+            'channel_id': self.channel_id,
+            'channel_username': self.channel_username,
+            'num_videos': self.num_videos,
+            'oldest_date': self.oldest_date,
+            'most_recent_date': self.most_recent_date
+        }
+        if self.db_connected:
+            self.mongo.upsert_channel(channel_data)
         
-    
-    def save_to_json(self) -> None:
-        """
-        saves a dictionary to a JSON file in a specific folder.
-        """
-        # Sort the videos
-        sorted_videos = sort_videos_by_date(self.all_videos)
-
-        filename = self.channel_username.replace(' ','')+'_videos.json'
-        folder_path = 'Channel_Videos'
-        file_path = os.path.join(folder_path, filename)
-
-        with open(file_path, 'w') as f:
-            json.dump(sorted_videos, f, indent=4)    # indent allows to get tab spacing
-            print(f"Video data has been saved to {file_path}")
-            logger.info(f"Saved video data to {file_path}")
+        print(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
+        logger.info(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
 
         
     def update_dates(self) -> None:
         """
         Update the oldest and most recent dates from the dictionary of all videos.
         """
-        dates = []
-        for video_data in self.all_videos.values():
-            published_at = video_data.get('published_at')
-            if published_at:
-                # Convert the string date to a datetime object
-                date_obj = datetime.fromisoformat(published_at.rstrip('Z'))
-                dates.append(date_obj)
-        
-        # Find the oldest and most recent dates
-        if dates:
-            self.oldest_date = min(dates)
-            self.most_recent_date = max(dates)
-            logger.info(f"Updated date range for channel {self.channel_username}: "
-                    f"oldest {self.oldest_date}, most recent {self.most_recent_date}")
+        if self.all_videos:
+            dates = []
+            for video_data in self.all_videos.values():
+                published_at = video_data.get('published_at')
+                if published_at:
+                    # Convert the string date to a datetime object
+                    date_obj = datetime.fromisoformat(published_at.rstrip('Z'))
+                    dates.append(date_obj)
             
+            # Find the oldest and most recent dates
+            if dates:
+                self.oldest_date = min(dates)
+                self.most_recent_date = max(dates)
+                # Update the channel data in the database with the new date range
+                channel_data = {
+                    'channel_id': self.channel_id,
+                    'channel_username': self.channel_username,
+                    'num_videos': self.num_videos,
+                    'oldest_date': self.oldest_date,
+                    'most_recent_date': self.most_recent_date
+                }
+                if self.db_connected:
+                    self.mongo.upsert_channel(channel_data)
 
-    def initialize_new_channel(self) -> None:
-        """
-        Initialize data for a new channel with no existing record.
-        If the channel has 200 or fewer videos, retrieve all video IDs.
-        Otherwise, set a flag for lazy loading.
-        """
-        if self.num_videos <= 300:
-            self.all_video_ids = self.get_all_video_ids()
-        else:
-            self.lazy_load = True
-            self.all_video_ids = None       # Will be populated later as needed
-        
-        logger.info(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
-
+                logger.info(f"Updated date range for channel {self.channel_username}: "
+                        f"oldest {self.oldest_date}, most recent {self.most_recent_date}")
             
 
     def get_info(self) -> None:
         """
-        print information regarding the current channel
+        Print information regarding the current channel
         """
-        print('')
+        print('\n' + '='*50)
         print(f'INFO ABOUT THE CHANNEL:')
-        print(f'The username for this channel is: {self.channel_username}.')
-        print(f'The channel id is: {self.channel_id}')
-        print(f'The number of videos published by this channel is: {self.num_videos}.')
+        print(f'Channel Username: {self.channel_username}')
+        print(f'Channel ID: {self.channel_id}')
+        print(f'Total Videos Published: {self.num_videos}')
         if self.all_videos:
-            print(f'The number of videos already retrieved is: {len(self.all_videos)}')
+            print(f'Videos Retrieved: {len(self.all_videos)}')
             if self.oldest_date:
-                print(f'The oldest video was published on: {self.oldest_date}')
+                print(f'Oldest Video Date: {self.oldest_date}')
             if self.most_recent_date:
-                print(f'The most recent video was published on: {self.most_recent_date}')
+                print(f'Most Recent Video Date: {self.most_recent_date}')
+        print('='*50 + '\n')
 
 
     ### MAIN API CALLS
@@ -454,7 +499,7 @@ class InfoYT():
                 snippet = item['snippet']
                 content_details = item['contentDetails']
 
-                self.all_videos[video_id] = {
+                video_data = {
                     'title': snippet['title'],
                     'published_at': snippet['publishedAt'],
                     'description': snippet['description'],
@@ -462,6 +507,8 @@ class InfoYT():
                     'tags': snippet.get('tags'),
                     'timestamps': extract_timestamps(snippet['description'])
                 }
+
+                self.all_videos[video_id] = video_data
 
             logger.info(f"Processed batch of {len(video_ids)} videos.")
 
@@ -484,22 +531,19 @@ class InfoYT():
         This method handles cases where we already have some videos stored.
         """
         logger.info(f"Starting video synchronization for channel: {self.channel_username}")
+        logger.info(f"MongoDB connection status at start of sync_videos: {self.db_connected}")
         
         # Get all current video IDs from the channel
         current_video_ids = set(self.get_all_video_ids())
-        
-        if self.all_videos is None:
-            self.all_videos = {}
-        
         stored_video_ids = set(self.all_videos.keys())
         
         # Find new videos (in current but not in stored)
         new_video_ids = current_video_ids - stored_video_ids
-        print(f'The number of new videos is: {len(new_video_ids)}')
+        print(f'Number of new videos detected: {len(new_video_ids)}')
         
         # Find removed videos (in stored but not in current)
         removed_video_ids = stored_video_ids - current_video_ids
-        print(f'The number of removed videos is: {len(removed_video_ids)}')
+        print(f'Number of videos no longer available: {len(removed_video_ids)}')
         
         # Remove videos that are no longer in the channel
         for video_id in removed_video_ids:
@@ -509,13 +553,19 @@ class InfoYT():
         # Fetch information for new videos
         if new_video_ids:
             try:
+                print(f"Fetching data for {len(new_video_ids)} new videos...")
                 self.fetch_new_videos(list(new_video_ids))
             except QuotaExceededException:
                 logger.warning("Quota exceeded during sync. Sync is incomplete.")
+                print("WARNING: YouTube API quota exceeded. Synchronization is incomplete.")
         
-        print(f"Video synchronization completed. Added {len(new_video_ids)} new videos, removed {len(removed_video_ids)} videos.")
+        print(f"Video synchronization completed.")
+        print(f"  - Added: {len(new_video_ids)} new videos")
+        print(f"  - Removed: {len(removed_video_ids)} videos")
+        print(f"  - Total videos after sync: {len(current_video_ids)}")
         logger.info(f"Video synchronization completed. Added {len(new_video_ids)} new videos, removed {len(removed_video_ids)} videos.")
         
+        self.num_videos = len(current_video_ids)
         # Update dates after synchronization
         self.update_dates()
 
@@ -564,4 +614,41 @@ class InfoYT():
         df['published_at'] = pd.to_datetime(df['published_at'])
         df = df.sort_values('published_at', ascending=False).reset_index(drop=True)
         return df
+    
+
+    def save_data(self):
+
+        logger.info(f"MongoDB connection status at start of save_data: {self.db_connected}")
+
+        # Sort the videos
+        self.all_videos = sort_videos_by_date(self.all_videos)
+
+        print(self.db_connected)
+        # Update the videos to the database
+        if self.db_connected:
+            self.mongo.sync_videos(self.channel_username, self.all_videos)
+        
+        # Save the videos to a local JSON file
+        filename = f"{self.channel_username.replace(' ', '')}_videos.json"
+        folder_path = 'Channel_Videos'
+        file_path = os.path.join(folder_path, filename)
+        
+        #os.makedirs(folder_path, exist_ok=True)
+        with open(file_path, 'w') as f:
+            json.dump(self.all_videos, f, indent=4)     # indent allows to get tab spacing
+        print(f"Video data has been saved to {file_path}")
+        logger.info(f"Saved video data to {file_path}")
+            
+
+    def close_connection(self):
+        """
+        Close the MongoDB connection if it's open.
+        """
+        if self.db_connected and self.mongo:
+            self.mongo.close()
+            self.db_connected = False
+            print("MongoDB connection closed.")
+        else:
+            print("No active MongoDB connection to close.")
+
             
