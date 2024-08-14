@@ -164,7 +164,7 @@ class InfoYT():
     This class retrieves information about a YouTube channel and its videos.
     """
 
-    def __init__(self, url: str, data_source: str = "Local JSON") -> None:
+    def __init__(self, url: str, data_source: str = "Local JSON", mongo_client = None) -> None:
         """
         Initialize the InfoYT object with a YouTube channel URL.
         :param url: YouTube channel URL
@@ -177,8 +177,12 @@ class InfoYT():
         self.mongo = None
         self.db_connected = False
         if data_source == "MongoDB":
-            self.mongo = MongoOperations()
-            self.db_connected = self.mongo.connect()
+            if mongo_client:
+                self.mongo = mongo_client
+                self.db_connected = self.verify_mongo_connection()
+            else:
+                self.mongo = MongoOperations()
+                self.db_connected = self.mongo.connect()
             logger.info(f"Initial MongoDB connection status: {self.db_connected}")
         
         # Get channel ID and username from URL
@@ -363,6 +367,23 @@ class InfoYT():
             if self.most_recent_date:
                 print(f'Most Recent Video Date: {self.most_recent_date}')
         print('='*50 + '\n')
+
+
+    def verify_mongo_connection(self) -> bool:
+        """
+        Verify the MongoDB connection status.
+        :return: True if connection is active, False otherwise
+        """
+        if self.mongo is None:
+            return False
+        
+        try:
+            # Attempt a simple operation to verify the connection
+            self.mongo.client.admin.command('ismaster')
+            return True
+        except Exception as e:
+            logger.error(f"MongoDB connection verification failed: {str(e)}")
+            return False
 
 
     ### MAIN API CALLS
