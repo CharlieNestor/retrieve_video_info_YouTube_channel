@@ -3,9 +3,12 @@ import time
 import json
 import math
 import random
+import requests
 import pandas as pd
 import altair as alt
 import streamlit as st
+from PIL import Image
+from io import BytesIO
 from infoYT import InfoYT, QuotaExceededException
 from mongo_operations import MongoOperations
 from datetime import datetime, timedelta
@@ -292,15 +295,39 @@ def main():
             info_yt = initialize_info_yt(url, data_source, mongo_client)
 
             if info_yt:
+                # Display channel information and actions
                 st.header('Channel Information')
-                col1, col2, col3 = st.columns(3)
+
+                col1, col2 = st.columns([1, 3])
+
                 with col1:
-                    st.metric("Channel Name", info_yt.channel_username)
+                    # Display channel thumbnail
+                    if info_yt.channel_thumbnails and 'default' in info_yt.channel_thumbnails:
+                        thumbnail_url = info_yt.channel_thumbnails['default']['url']
+                        response = requests.get(thumbnail_url)
+                        img = Image.open(BytesIO(response.content))
+                        st.image(img, width=125)
+
                 with col2:
-                    st.metric("Total Published Videos", info_yt.num_videos)
-                with col3:
-                    stored_videos = len(info_yt.all_videos) if info_yt.all_videos is not None else 0
-                    st.metric("Stored Videos", stored_videos)
+                    col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+                    with col_metrics1:
+                        st.metric("Channel Name", info_yt.channel_username)
+                    with col_metrics2:
+                        st.metric("Total Published Videos", info_yt.num_videos)
+                    with col_metrics3:
+                        stored_videos = len(info_yt.all_videos) if info_yt.all_videos is not None else 0
+                        st.metric("Stored Videos", stored_videos)
+
+                # Description in an expander for cleaner look
+                with st.expander("Channel Description", expanded=False):
+                    st.write(info_yt.channel_description)
+
+                # New row for additional metrics
+                col_metrics4, col_metrics5 = st.columns(2)
+                with col_metrics4:
+                    st.metric("Subscribers", f"{info_yt.subscriber_count:,}")
+                with col_metrics5:
+                    st.metric("Total Views", f"{info_yt.view_count:,}")
 
                 st.subheader('Actions')
                 col1, col2 = st.columns(2)
