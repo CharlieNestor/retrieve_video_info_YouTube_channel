@@ -126,7 +126,11 @@ def get_video_url(channel_username: str, mongo_client: MongoOperations = None) -
     return None
 
 
-def create_upload_frequency_chart(df):
+def create_upload_frequency_chart(df: pd.DataFrame) -> alt.Chart:
+    """
+    Create a chart showing the upload frequency of videos over time.
+    :param df: DataFrame with video data
+    """
     df['published_at'] = pd.to_datetime(df['published_at']).dt.tz_localize(None)
     chart_df = df.groupby(df['published_at'].dt.to_period('M').astype(str)).size().reset_index()
     chart_df.columns = ['date', 'count']
