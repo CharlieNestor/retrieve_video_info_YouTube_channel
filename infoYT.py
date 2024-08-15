@@ -61,68 +61,6 @@ def extract_channel_id(url: str) -> Union[str, None]:
     if channel_id_match:
         return channel_id_match.group(1)
     return None
-
-
-def get_channel_id_from_url(youtube, url:str) -> Tuple[str, Union[str, None]]:
-    """
-    retrieve the channel ID and channel username from a YouTube URL.
-    :param youtube: YouTube API client
-    :param url: YouTube URL
-    :return: channel ID and channel
-    """
-    try:
-        # Try to extract video ID
-        video_id = extract_video_id(url)
-        if video_id:
-            # Specific single request using video ID
-            request = youtube.videos().list(
-                part="snippet",
-                id=video_id
-            )
-            response = request.execute()
-            logger.info(f"API call: youtube.videos().list for video ID: {video_id}")
-
-            if 'items' in response and len(response['items']) > 0:
-                video_details = response['items'][0]
-                channel_id = video_details['snippet']['channelId']
-                channel_title = video_details['snippet']['channelTitle']
-                logger.info(f"Successfully retrieved channel info for video ID: {video_id}")
-                return channel_id, channel_title
-            else:
-                logger.warning(f"No video found for ID: {video_id}")
-                raise ValueError("Video not found")
-
-        # Try to extract channel ID or username
-        channel_id_username = extract_channel_id(url)
-        if channel_id_username:
-            # Check if it's a channel ID (starts with 'UC') or username/custom URL
-            if channel_id_username.startswith('UC'):
-                logger.info(f"Channel ID found: {channel_id_username}")
-                return channel_id_username, None
-            else:
-                # Try to fetch channel details using a search query
-                request = youtube.search().list(
-                    part="snippet",
-                    q=channel_id_username,      # this is literally making a query for parameter q
-                    type="channel",             # only search for channels
-                    maxResults=1
-                )
-                response = request.execute()
-                logger.info(f"API call: youtube.search().list for channel: {channel_id_username}")
-                
-                if 'items' in response and len(response['items']) > 0:
-                    channel_details = response['items'][0]
-                    channel_id = channel_details['snippet']['channelId']
-                    channel_title = channel_details['snippet']['channelTitle']
-                    logger.info(f"Successfully retrieved channel info for username: {channel_id_username}")
-                    return channel_id, channel_title
-                
-        logger.error(f"Invalid YouTube URL: {url}")
-        raise ValueError("Invalid YouTube URL")
-        
-    except Exception as e:
-        logger.error(f"Error in get_channel_id_from_url: {str(e)}", exc_info=True)
-        raise ValueError("Error in get_channel_id_from_url")
     
 
 def extract_timestamps(description:str) -> Dict[str, str]:
@@ -187,10 +125,17 @@ class InfoYT():
         
         # Get channel ID and username from URL
         try:
-            channel_id, channel_username = get_channel_id_from_url(self.youtube, url)
-            self.channel_id = channel_id
-            self.channel_username = channel_username
-            self.num_videos = self.get_video_count()
+            # Get channel info from URL
+            self.channel_info = self.get_channel_info(url)
+            self.channel_id = self.channel_info['id']
+            self.channel_username = self.channel_info['title']
+            self.num_videos = int(self.channel_info['video_count'])
+            self.channel_description = self.channel_info['description']
+            self.channel_keywords = self.channel_info['keywords']
+            self.channel_thumbnails = self.channel_info['thumbnails']
+            self.subscriber_count = int(self.channel_info['subscriber_count'])
+            self.view_count = int(self.channel_info['view_count'])
+
             self.all_videos = {}
             self.most_recent_date = None
             self.oldest_date = None
@@ -215,27 +160,104 @@ class InfoYT():
 
     ### INITIALIZATION METHODS
 
-    def get_video_count(self) -> int:
+    def get_channel_id_from_video(self, video_id: str) -> str:
         """
-        retrieve the total number of videos of a YouTube channel.
-        :return: number of videos
+        Function to get the channel ID from a video ID.
+        :param video_id: YouTube video ID
+        :return: channel ID
         """
         try:
-            # Fetch channel details
-            request = self.youtube.channels().list(
-                part="statistics",
-                id=self.channel_id
+            request = self.youtube.videos().list(
+                part="snippet",
+                id=video_id
             )
             response = request.execute()
-            logger.info(f"API call: youtube.channels().list for channel ID: {self.channel_id}")
+            logger.info(f"API call: youtube.videos().list for video ID: {video_id}")
 
             if 'items' in response and len(response['items']) > 0:
-                channel_stats = response['items'][0]['statistics']
-                video_count = channel_stats.get('videoCount')
-                return int(video_count)
+                return response['items'][0]['snippet']['channelId']
+            else:
+                raise ValueError("Video not found")
         except Exception as e:
-            logger.error(f"Error in get_video_count: {str(e)}", exc_info=True)
-            raise ValueError("Error in get_video_count")
+            logger.error(f"Error in get_channel_id_from_video: {str(e)}", exc_info=True)
+            raise ValueError("Error in get_channel_id_from_video")
+        
+    def get_channel_id_from_username(self, username: str) -> str:
+        """
+        Search for a YouTube channel ID using the channel username.
+        """
+        try:
+            request = self.youtube.search().list(
+                part="snippet",
+                type="channel",
+                q=username,
+                maxResults=1
+            )
+            response = request.execute()
+            logger.info(f"API call: youtube.search().list for username: {username}")
+
+            if 'items' in response and len(response['items']) > 0:
+                return response['items'][0]['snippet']['channelId']
+            else:
+                raise ValueError(f"Channel not found for username: {username}")
+        except Exception as e:
+            logger.error(f"Error in get_channel_id_from_username: {str(e)}", exc_info=True)
+            raise ValueError("Error in get_channel_id_from_username")
+        
+    
+    def get_channel_info(self, url: str) -> Dict[str, Any]:
+        """
+        Function to obtain information about a YouTube channel.
+        :param url: YouTube channel URL
+        :return: dictionary of channel information
+        """
+        # Extract channel username or ID from URL
+        channel_identifier = extract_channel_id(url)
+        # We did not find any identifier in the URL
+        if not channel_identifier:
+            # Check if it's a video URL
+            video_id = extract_video_id(url)
+            if video_id:
+                channel_id = self.get_channel_id_from_video(video_id)
+            else:
+                raise ValueError("Invalid YouTube URL")
+        else:
+            # We have a channel identifier and we are going to retrieve the channel ID from it
+            channel_id = self.get_channel_id_from_username(channel_identifier)
+            
+        print(f"Channel ID: {channel_id}")
+
+        try:
+            request = self.youtube.channels().list(
+                part="snippet,statistics",
+                id=channel_id
+            )
+            response = request.execute()
+            logger.info(f"API call: youtube.channels().list for channel ID: {channel_id}")
+
+            if 'items' in response and len(response['items']) > 0:
+                channel_info = response['items'][0]
+                snippet = channel_info['snippet']
+                statistics = channel_info['statistics']
+
+                channel_data = {
+                    'id': channel_id,
+                    'title': snippet.get('title', None),
+                    'description': snippet.get('description', None),
+                    'keywords': snippet.get('keywords', None),
+                    'thumbnails': snippet.get('thumbnails', None),
+                    'video_count': statistics.get('videoCount', None),
+                    'view_count': statistics.get('viewCount', None),
+                    'subscriber_count': statistics.get('subscriberCount', None),
+                }
+
+                return channel_data
+            else:
+                raise ValueError("Channel not found")
+
+        except Exception as e:
+            logger.error(f"Error in get_channel_info: {str(e)}", exc_info=True)
+            raise ValueError("Error in get_channel_info")
         
 
     def check_history(self, verbose=True) -> bool:
@@ -343,7 +365,11 @@ class InfoYT():
             channel_data = {
                 'channel_id': self.channel_id,
                 'channel_username': self.channel_username,
+                'channel_description': self.channel_description,
+                'subscriber_count': self.subscriber_count,
+                'view_count': self.view_count,
                 'num_videos': self.num_videos,
+                'thumbnails': self.channel_thumbnails,
                 'oldest_date': self.oldest_date,
                 'most_recent_date': self.most_recent_date
             }
@@ -359,6 +385,10 @@ class InfoYT():
         print(f'INFO ABOUT THE CHANNEL:')
         print(f'Channel Username: {self.channel_username}')
         print(f'Channel ID: {self.channel_id}')
+        print(f'Channel Description: {self.channel_description[:200]}...')
+        print(f'Channel Keywords: {self.channel_keywords}')
+        print(f'Subscriber Count: {self.subscriber_count}')
+        print(f'Total Views: {self.view_count}')
         print(f'Total Videos Published: {self.num_videos}')
         if self.all_videos:
             print(f'Videos Retrieved: {len(self.all_videos)}')
