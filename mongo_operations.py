@@ -47,6 +47,22 @@ class MongoOperations:
             print(f"An error occurred while connecting to MongoDB: {e}")
             logger.error(f"An error occurred while connecting to MongoDB: {e}")
             return False
+        
+    def verify_connection(self) -> bool:
+        """
+        Verify the MongoDB connection status.
+        :return: True if connection is active, False otherwise
+        """
+        if self.client is None:
+            return False
+        
+        try:
+            # Attempt a simple operation to verify the connection
+            self.client.admin.command('ismaster')
+            return True
+        except Exception as e:
+            logger.error(f"MongoDB connection verification failed: {str(e)}")
+            return False
 
     def close(self):
         """
@@ -77,8 +93,9 @@ class MongoOperations:
             else:
                 logger.info(f"Channel updated: {channel_data['channel_username']}")
             
-            # Ensure the video collection exists for this channel
-            self.db.create_collection(channel_data['channel_username'])
+            # Check if the collection exists before creating it
+            if channel_data['channel_username'] not in self.db.list_collection_names():
+                self.db.create_collection(channel_data['channel_username'])
             
             return channel_data['channel_username']
         except Exception as e:
