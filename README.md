@@ -15,7 +15,7 @@ YouTube Channel Video Tracker is a powerful Python-based tool designed to stream
 - **Flexible API Integration**: Built on the YouTube Data API v3 for reliable and up-to-date information.
 - **Data Visualization**: View upload frequency charts and paginated video listings.
 - **Logging**: Comprehensive logging system for better debugging and monitoring.
-- **Docker Support**: Easy deployment and consistent environment using Docker.
+- **Docker Support**: Easy deployment and consistent environment using Docker, including MongoDB setup.
 
 
 ## Usage
@@ -60,15 +60,15 @@ streamlit run infoYT_streamlit.py
 ## How it Works
 
 1. Enter a YouTube channel URL or select an existing channel from the dropdown.
-2. The app retrieves basic channel information and checks for existing data.
-3. You can sync videos to update the local database with the latest channel information.
+2. The app retrieves comprehensive channel information, including subscriber count, total views, and channel description.
+3. You can sync videos to update the local database with the latest channel and video information.
 4. View stored videos in a paginated table, search by title, and visualize upload frequency.
 5. Export video data to CSV for further analysis.
 
 ## Data Storage
 
-1. **Local JSON**: Channel data is stored in JSON files within the `Channel_Videos/` directory.
-2. **MongoDB**: Data is stored in a MongoDB database, which can be accessed and managed using the provided Docker setup.
+1. **MongoDB (Primary)**: Data is stored in a MongoDB database, which can be accessed and managed using the provided Docker setup.
+2. **Local JSON (Fallback)**: Channel data is stored in JSON files within the `Channel_Videos/` directory.
 
 
 
