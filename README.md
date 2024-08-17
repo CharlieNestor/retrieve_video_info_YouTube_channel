@@ -38,7 +38,7 @@ MONGO_DB=youtube_tracker
 ### Running MongoDB via Docker
 Start the MongoDB container by running in the Terminal:
 ```sh
-docker-compose up -d
+docker-compose -f docker_youtube_tracker.yml up -d
 ```
 
 ### Running the Streamlit App
@@ -54,7 +54,7 @@ streamlit run infoYT_streamlit.py
 - `infoYT_streamlit.py`: Streamlit web interface implementation.
 - `mongo_operations.py`: MongoDB operations for data storage and retrieval.
 - `logging_config.py`: Configuration for the logging system.
-- `docker-compose.yml`: Docker Compose configuration for easy deployment.
+- `docker_youtube_tracker.yml`: Docker Compose configuration for easy deployment.
 - `Channel_Videos/`: Storage directory for channel-specific JSON data files.
 
 ## How it Works
