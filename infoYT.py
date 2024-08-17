@@ -542,8 +542,8 @@ class InfoYT():
                     'title': snippet['title'],
                     'published_at': snippet['publishedAt'],
                     'description': snippet['description'],
-                    'duration': content_details['duration'],
-                    'tags': snippet.get('tags'),
+                    'duration': content_details.get('duration', None),
+                    'tags': snippet.get('tags', None),
                     'timestamps': extract_timestamps(snippet['description'])
                 }
 
