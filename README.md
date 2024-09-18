@@ -36,12 +36,7 @@ git clone https://github.com/CharlieNestor/retrieve_video_info_YouTube_channel.g
 3. Create a .env file containing your YouTube Data API key and MongoDB credentials (if you choose to run MongoDB via Docker):
 ```sh
 YOUTUBE_API_KEY=your_api_key_here
-
-MONGO_HOST=mongo
-MONGO_PORT=27017
-MONGO_USERNAME=admin
-MONGO_PASSWORD=password
-MONGO_DB=youtube_tracker
+MONGO_URI=mongodb://admin:password@localhost:27017/
 ```
 
 4. Install the required packages in a new virtual environment:

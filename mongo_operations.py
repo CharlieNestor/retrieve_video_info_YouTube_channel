@@ -25,6 +25,7 @@ class MongoOperations:
         :return: True if connection is successful, False otherwise
         """
         try:
+            """
             # Attempt to connect to MongoDB using environment variables
             self.client = MongoClient(
                 host=os.getenv('MONGO_HOST', 'localhost'),
@@ -33,9 +34,20 @@ class MongoOperations:
                 password=os.getenv('MONGO_PASSWORD', 'password'),
                 serverSelectionTimeoutMS=5000   # 5 second timeout
             )
+            """
+            # Get MongoDB URI and database name from environment variables
+            mongo_uri = os.getenv('MONGO_URI', 'mongodb://admin:password@localhost:27017/')
+            db_name = os.getenv('MONGO_DB', 'youtube_tracker')
+
+            # Attempt to connect to MongoDB
+            self.client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        
             # Force a connection attempt to verify
             self.client.admin.command('ismaster')
-            self.db = self.client[os.getenv('MONGO_DB', 'youtube_tracker')]
+
+            # Select the database
+            self.db = self.client[db_name]
+
             print("Connected to MongoDB successfully!")
             logger.info("Connected to MongoDB successfully!")
             return True
