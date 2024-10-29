@@ -1,9 +1,18 @@
+# Virtual environment
 .venv/
+
+# Python cache
 __pycache__/
+
+# Folders
 Channel_Videos/
 wip_files/
+logs/
 
+# Environment variables
 .env
 .python-version
 
-youtube_data_tool.log
+# Storage files
+logs/
+.DS_Store
