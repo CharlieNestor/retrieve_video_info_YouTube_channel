@@ -263,7 +263,7 @@ class InfoYT():
     def check_history(self, verbose=True) -> bool:
         """
         Check if a file with the channel's videos already exists in the Channel_Videos folder.
-        If the folder doesn't exist, it will be created.
+        If the folder doesn't exist, we will create it.
         """
         filename = f"{self.channel_username.replace(' ', '')}_videos.json"
         folder_path = 'Channel_Videos'
@@ -287,7 +287,7 @@ class InfoYT():
             return False
         
 
-    def load_from_json(self) -> dict:
+    def load_from_json(self) -> None:
         """
         Load channel data from local JSON file.
         """
@@ -303,7 +303,7 @@ class InfoYT():
             logger.info(f"No existing JSON data found for channel: {self.channel_username}")
 
 
-    def load_from_db(self):
+    def load_from_db(self) -> None:
         """
         Load channel data from MongoDB.
         """
@@ -337,6 +337,40 @@ class InfoYT():
         
         print(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
         logger.info(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
+
+    
+    def delete_channel(self) -> bool:
+        """
+        Delete all channel information from the selected storage system.
+        :return: True if deletion was successful, False otherwise
+        """
+        success = True
+        
+        try:
+            # Delete from MongoDB if connected
+            if self.db_connected:
+                success &= self.mongo.delete_channel(self.channel_username)
+            
+            # Delete local JSON file
+            filename = f"{self.channel_username.replace(' ', '')}_videos.json"
+            folder_path = 'Channel_Videos'
+            file_path = os.path.join(folder_path, filename)
+            
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Deleted local JSON file for channel: {self.channel_username}")
+            
+            # Clear instance variables
+            self.all_videos = {}
+            self.most_recent_date = None
+            self.oldest_date = None
+            
+            logger.info(f"Successfully deleted channel: {self.channel_username}")
+            return success
+        
+        except Exception as e:
+            logger.error(f"Error deleting channel {self.channel_username}: {e}")
+            return False
 
         
     def update_dates(self) -> None:

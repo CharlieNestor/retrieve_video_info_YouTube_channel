@@ -113,6 +113,28 @@ class MongoOperations:
         except Exception as e:
             logger.error(f"Error upserting channel {channel_data['channel_username']}: {e}")
 
+    
+    def delete_channel(self, channel_username: str) -> bool:
+        """
+        Delete a channel and all its videos from the database.
+        :param channel_username: The username of the channel to delete
+        :return: True if deletion was successful, False otherwise
+        """
+        try:
+            # Delete the channel document from channels collection
+            channel_result = self.db.channels.delete_one({"channel_username": channel_username})
+            
+            # Drop the channel's videos collection
+            if channel_username in self.db.list_collection_names():
+                self.db[channel_username].drop()
+            
+            logger.info(f"Deleted channel {channel_username} and its videos from MongoDB")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting channel {channel_username} from MongoDB: {e}")
+            return False
+
+
     def get_channel(self, channel_username):
         """
         Retrieve a channel document from the database.

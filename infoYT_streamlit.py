@@ -273,8 +273,67 @@ def main():
         # If there's no connection, stop further execution
         if mongo_client is None:
             st.stop()
+
+    
+    with st.expander("⚠️ Channel Management", expanded=False):
+        st.warning("Warning: Channel deletion is permanent and cannot be undone!")
         
+        # Get list of existing channels
+        channels_to_delete = get_existing_channels(mongo_client)
         
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            channel_to_delete = st.selectbox(
+                "Select channel to delete",
+                [""] + channels_to_delete,
+                key="channel_to_delete"
+            )
+        
+        with col2:
+            if channel_to_delete:
+                # Two-step deletion process using session state
+                if 'confirm_delete' not in st.session_state:
+                    st.session_state.confirm_delete = False
+
+                if not st.session_state.confirm_delete:
+                    if st.button("Delete Channel", type="secondary"):
+                        st.session_state.confirm_delete = True
+                
+                if st.session_state.confirm_delete:
+                    st.warning("⚠️ Are you sure? This action cannot be undone!")
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        if st.button("Yes, Delete", type="primary"):
+                            try:
+                                success = True
+                                # Handle MongoDB deletion if connected
+                                if data_source == "MongoDB" and mongo_client:
+                                    success &= mongo_client.delete_channel(channel_to_delete)
+                                
+                                # Handle local JSON deletion
+                                json_path = os.path.join('Channel_Videos', f"{channel_to_delete}_videos.json")
+                                if os.path.exists(json_path):
+                                    os.remove(json_path)
+
+                                if success:
+                                    st.success(f"Successfully deleted channel: {channel_to_delete}")
+                                    # Clear the cache to refresh the channel list
+                                    get_mongo_client.clear()
+                                    # Reset confirmation state
+                                    st.session_state.confirm_delete = False
+                                    # Rerun the app to refresh the interface
+                                    st.experimental_rerun()
+                                else:
+                                    st.error("Failed to delete channel")
+                            except Exception as e:
+                                st.error(f"Error deleting channel: {str(e)}")
+                    
+                    with col2:
+                        if st.button("No, Cancel", type="secondary"):
+                            st.session_state.confirm_delete = False
+                            st.experimental_rerun()
+
 
     col1, col2 = st.columns(2)
 
