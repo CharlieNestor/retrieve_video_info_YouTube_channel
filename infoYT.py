@@ -182,6 +182,7 @@ class InfoYT():
             logger.error(f"Error in get_channel_id_from_video: {str(e)}", exc_info=True)
             raise ValueError("Error in get_channel_id_from_video")
         
+        
     def get_channel_id_from_username(self, username: str) -> str:
         """
         Search for a YouTube channel ID using the channel username.
@@ -337,40 +338,6 @@ class InfoYT():
         
         print(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
         logger.info(f"Initialized new channel: {self.channel_username} with {self.num_videos} videos")
-
-    
-    def delete_channel(self) -> bool:
-        """
-        Delete all channel information from the selected storage system.
-        :return: True if deletion was successful, False otherwise
-        """
-        success = True
-        
-        try:
-            # Delete from MongoDB if connected
-            if self.db_connected:
-                success &= self.mongo.delete_channel(self.channel_username)
-            
-            # Delete local JSON file
-            filename = f"{self.channel_username.replace(' ', '')}_videos.json"
-            folder_path = 'Channel_Videos'
-            file_path = os.path.join(folder_path, filename)
-            
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"Deleted local JSON file for channel: {self.channel_username}")
-            
-            # Clear instance variables
-            self.all_videos = {}
-            self.most_recent_date = None
-            self.oldest_date = None
-            
-            logger.info(f"Successfully deleted channel: {self.channel_username}")
-            return success
-        
-        except Exception as e:
-            logger.error(f"Error deleting channel {self.channel_username}: {e}")
-            return False
 
         
     def update_dates(self) -> None:

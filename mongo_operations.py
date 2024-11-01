@@ -129,6 +129,7 @@ class MongoOperations:
                 self.db[channel_username].drop()
             
             logger.info(f"Deleted channel {channel_username} and its videos from MongoDB")
+            print(f"Deleted channel {channel_username} and its videos from MongoDB")
             return True
         except Exception as e:
             logger.error(f"Error deleting channel {channel_username} from MongoDB: {e}")

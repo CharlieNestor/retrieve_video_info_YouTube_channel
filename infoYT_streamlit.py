@@ -274,14 +274,14 @@ def main():
         if mongo_client is None:
             st.stop()
 
-    
+    # Channel Management (deletion of a channel and all its videos)    
     with st.expander("⚠️ Channel Management", expanded=False):
         st.warning("Warning: Channel deletion is permanent and cannot be undone!")
         
         # Get list of existing channels
         channels_to_delete = get_existing_channels(mongo_client)
         
-        col1, col2 = st.columns([3, 1])
+        col1, col2 = st.columns([2, 1])
         
         with col1:
             channel_to_delete = st.selectbox(
@@ -291,6 +291,8 @@ def main():
             )
         
         with col2:
+            st.write("")    # leaving some space for the button
+            st.write("")
             if channel_to_delete:
                 # Two-step deletion process using session state
                 if 'confirm_delete' not in st.session_state:
