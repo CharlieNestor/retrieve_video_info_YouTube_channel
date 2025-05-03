@@ -1,7 +1,4 @@
 python-dotenv==1.0.1
-google-api-python-client==2.130.0
-pytz==2024.1
-streamlit==1.33.0
-watchdog==4.0.0
 pandas==2.2.1
-pymongo==4.7.0
+numpy==1.26.4
+yt-dlp==2025.2.19
