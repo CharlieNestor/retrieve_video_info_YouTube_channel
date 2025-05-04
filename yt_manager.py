@@ -47,22 +47,27 @@ class YouTubeManager:
         self.video_manager = VideoManager(self.storage, self.downloader)
         #self.playlist_manager = PlaylistManager(self.storage, self.downloader)
 
-    def process_url(self, url: str):
+    def process_url(self, url: str, force_update: bool = False):
         """
-        Process any YouTube URL and return appropriate data
+        Process any YouTube URL and return appropriate data. 
+        This is the Entry Point for the user.
+
+        :param url: The YouTube URL to process.
+        :param force_update: If True, force update regardless of last update time. Defaults to False.
+        :return: Appropriate data dictionary or raises ValueError.
         """
 
         entity_type, entity_id = self.parser.parse_url(url)
         
         if entity_type == 'channel':
-            return self.channel_manager.process(entity_id)
+            return self.channel_manager.process(entity_id, force_update=force_update)
         elif entity_type == 'video':
-            return self.video_manager.process(entity_id)
+            return self.video_manager.process(entity_id, force_update=force_update)
         elif entity_type == 'playlist':
             return self.playlist_manager.process(entity_id)
         elif entity_type == 'short':
             # Shorts are just videos with a different URL format
-            return self.video_manager.process(entity_id)
+            return self.video_manager.process(entity_id, force_update=force_update)
         else:
             raise ValueError(f"Unknown entity type: {entity_type}")
         
@@ -510,7 +515,6 @@ class SQLiteStorage:
             cursor.execute("""
                 UPDATE videos SET
                     status = ?,
-                    last_updated = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (status, video_id))
             self.conn.commit()
@@ -541,7 +545,6 @@ class SQLiteStorage:
                     file_path = ?,
                     downloaded = 1,
                     download_date = CURRENT_TIMESTAMP,
-                    last_updated = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (file_path, video_id))
             self.conn.commit()
@@ -565,7 +568,6 @@ class SQLiteStorage:
             cursor.execute("""
                 UPDATE videos SET
                     playlist_id = ?,
-                    last_updated = CURRENT_TIMESTAMP
                 WHERE id = ? AND playlist_id IS NULL -- Optionally only update if not already set
             """, (playlist_id, video_id))
             self.conn.commit()
@@ -1261,22 +1263,27 @@ class ChannelManager:
         self.storage = storage
         self.downloader = downloader
 
-    def process(self, channel_id: str):
+    def process(self, channel_id: str, force_update: bool = False):
         """
         Process a channel: fetch info, store in database, return data
         
         :param channel_id: YouTube channel ID
+        :param force_update: If True, force update regardless of last update time. Defaults to False.
         :return: dict: Channel information
         """
         # First check if we already have this channel
         existing_channel = self.storage.get_channel(channel_id)
         if existing_channel:
-            # Check if we need to update (e.g., older than x days)
-            if self._needs_update(existing_channel):
+            # Force update if requested OR if it needs an update based on time
+            if force_update or self._needs_update(existing_channel):
+                print(f"Updating channel {channel_id} ...")
                 return self.update_channel(channel_id)
+            # Otherwise, return the existing data
+            print(f"Channel {channel_id} exists. Returning cached data.")
             return existing_channel
 
-        # Fetch channel info from YouTube
+        # Fetch channel info from YouTube if it doesn't exist
+        print(f"Channel {channel_id} not found in DB. Fetching...")
         try:
             channel_info = self.downloader.get_channel_info(channel_id)
             if not channel_info:
@@ -1284,13 +1291,13 @@ class ChannelManager:
             
             # Store in database
             self.storage.save_channel(channel_info)
+            print(f"Successfully fetched and saved channel {channel_id}.")
             return channel_info
             
         except Exception as e:
             print(f"Error processing channel {channel_id}: {str(e)}")
             raise
 
-    
     def update_channel(self, channel_id: str) -> dict:
         """
         Update channel information and its videos
@@ -1302,9 +1309,9 @@ class ChannelManager:
             # Get fresh channel data
             channel_info = self.downloader.get_channel_info(channel_id)
             if not channel_info:
-                raise ValueError(f"Could not update channel {channel_id}")
+                raise ValueError(f"Could not fetch updated info for channel {channel_id}")
             
-            # Update in database
+            # Update in database (replaces existing)
             self.storage.save_channel(channel_info)
             
             # Update video list
@@ -1317,7 +1324,7 @@ class ChannelManager:
             raise
     
     
-    def _needs_update(self, existing_channel):
+    def _needs_update(self, existing_channel: dict, days: int = 30) -> bool:
         """
         Determine if a channel needs to be updated based on its last update time
         
@@ -1325,7 +1332,7 @@ class ChannelManager:
         :return: bool: True if channel needs update, False otherwise
         """
         if 'last_updated' not in existing_channel.keys() or not existing_channel['last_updated']:
-            return True
+            return True # Needs update if timestamp is missing
             
         # Convert string timestamp to datetime
         try:
@@ -1345,9 +1352,17 @@ class ChannelManager:
             
             # Get current time
             now = datetime.now()
-            
-            # Update if older than 30 days (30 * 24 * 60 * 60 = 2592000 seconds)
-            return (now - last_updated).total_seconds() > 2592000
+
+            # Calculate time difference
+            time_difference = now - last_updated
+            update_threshold_seconds = days * 24 * 60 * 60
+
+            needs_update = time_difference.total_seconds() > update_threshold_seconds
+            if needs_update:
+                 print(f"Video {existing_channel.get('id')} needs update. Last updated: {last_updated_str} ({time_difference.days} days ago).")
+            # else:
+            #      print(f"Video {existing_video.get('id')} is up-to-date. Last updated: {last_updated_str} ({time_difference.days} days ago).")
+            return needs_update
         except Exception as e:
             print(f"Error parsing timestamp: {str(e)}")
             # If we can't parse the timestamp, better to update
@@ -1401,23 +1416,25 @@ class VideoManager:
         self.storage = storage
         self.downloader = downloader
 
-    def process(self, video_id: str) -> Optional[dict]:
+    def process(self, video_id: str, force_update: bool = False) -> Optional[dict]:
         """
         Process a video: fetch info if needed, store in database, return data.
         Returns None if the video cannot be processed or found.
         
         :param video_id: YouTube video ID
+        :param force_update: If True, force update regardless of last update time. Defaults to False.
         :return: dict: Video information or None
         """
         try:
             existing_video = self.storage.get_video(video_id)
             if existing_video:
-                # TODO: Implement more sophisticated update logic if needed
-                # For now, if it exists, return it. 
-                # Could add _needs_update logic similar to ChannelManager later.
-                # if self._needs_update(existing_video):
-                #     return self.update_video(video_id)
-                return dict(existing_video) # Convert Row to dict
+                # Force update if requested OR if it needs an update based on time
+                if force_update or self._needs_update(existing_video):
+                    print(f"Updating video {video_id} ...")
+                    return self.update_video(video_id) # <-- Call update_video
+                # Otherwise, return the existing data
+                print(f"Video {video_id} exists. Returning cached data.")
+                return dict(existing_video)
 
             # Video doesn't exist in DB, fetch it
             print(f"Video {video_id} not found in DB. Fetching...")
@@ -1451,6 +1468,89 @@ class VideoManager:
             print(f"Error processing video {video_id}: {str(e)}")
             # Potentially re-raise or handle specific exceptions
             return None # Indicate failure
+        
+    def update_video(self, video_id: str) -> Optional[dict]:
+        """
+        Fetches fresh video information and updates the database.
+
+        :param video_id: YouTube video ID
+        :return: upddated video Info or None on failure
+        """
+        try:
+            # Get fresh video data
+            video_info = self.downloader.get_video_info(video_id)
+            if not video_info:
+                print(f"WARNING: Failed to fetch updated info for video {video_id}, downloader returned None.")
+                # Update status to indicate fetch failure during update
+                self.storage._update_video_status(video_id, 'update_fetch_failed')
+                return None
+
+            # Ensure channel exists (minimal check/fetch, don't force update channel)
+            channel_id = video_info.get('channel_id')
+            if channel_id and not self.storage.channel_exists(channel_id):
+                print(f"Warning: Channel {channel_id} for video {video_id} not found during update. Fetching channel info...")
+                try:
+                    channel_manager = ChannelManager(self.storage, self.downloader)
+                    channel_manager.process(channel_id, force_update=False) # Don't force channel update
+                except Exception as e:
+                    print(f"Error fetching/processing channel {channel_id} during video update: {e}")
+                    # If the channel cannot be fetched we won't update the video
+                    return None
+
+            # Save the updated video info (this replaces the old record)
+            self.storage.save_video(video_info)
+            print(f"Successfully updated video {video_id} in database.")
+            return video_info
+
+        except Exception as e:
+            print(f"Error updating video {video_id}: {str(e)}")
+            self.storage._update_video_status(video_id, 'update_processing_error')
+            return None
+        
+    def _needs_update(self, existing_video: dict, days: int = 30) -> bool:
+        """
+        Determine if a video needs to be updated based on its last update time.
+        Similar to ChannelManager._needs_update.
+
+        :param existing_video: Existing video data from database (as dict).
+        :param days: Number of days after which the data is considered stale.
+        :return: bool: True if video needs update, False otherwise.
+        """
+        last_updated_str = existing_video.get('last_updated')
+        if not last_updated_str:
+            print(f"Video {existing_video.get('id')} missing 'last_updated' timestamp. Needs update.")
+            return True # Needs update if timestamp is missing
+
+        try:
+            # Handle different possible formats (ISO with Z, ISO without Z, SQLite default)
+            if 'T' in last_updated_str:
+                if last_updated_str.endswith('Z'):
+                    last_updated_str = last_updated_str.replace('Z', '+00:00')
+                # Remove potential fractional seconds if present, as fromisoformat might struggle
+                last_updated_str = re.sub(r'\\.\\d+', '', last_updated_str)
+                last_updated = datetime.fromisoformat(last_updated_str)
+            else:
+                # Standard SQLite format "YYYY-MM-DD HH:MM:SS"
+                last_updated = datetime.strptime(last_updated_str, '%Y-%m-%d %H:%M:%S')
+
+            now = datetime.now()
+
+            # Calculate time difference
+            time_difference = now - last_updated
+            update_threshold_seconds = days * 24 * 60 * 60
+
+            needs_update = time_difference.total_seconds() > update_threshold_seconds
+            if needs_update:
+                 print(f"Video {existing_video.get('id')} needs update. Last updated: {last_updated_str} ({time_difference.days} days ago).")
+            # else:
+            #      print(f"Video {existing_video.get('id')} is up-to-date. Last updated: {last_updated_str} ({time_difference.days} days ago).")
+            return needs_update
+
+        except Exception as e:
+            print(f"Error parsing timestamp '{last_updated_str}' for video {existing_video.get('id')}: {str(e)}. Assuming update needed.")
+            # If we can't parse the timestamp, better to update
+            return True
+
 
 
     def download_video(self, video_id: str, force_download: bool = False) -> Optional[str]:
