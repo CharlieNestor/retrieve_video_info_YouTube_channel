@@ -322,12 +322,27 @@ class SQLiteStorage:
         if isinstance(content_breakdown, dict):
             content_breakdown = json.dumps(content_breakdown)
         
-        cursor.execute("""
-            INSERT OR REPLACE INTO channels (
-                id, name, description, subscriber_count, 
-                video_count, thumbnail_url, content_breakdown, last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (
+        # SQL for inserting a new channel or updating an existing one.
+        # created_at is set to CURRENT_TIMESTAMP on initial insert.
+        # last_updated is set to CURRENT_TIMESTAMP on both insert and update.
+        # On conflict (update), created_at is NOT modified.
+        sql = """
+            INSERT INTO channels (
+                id, name, description, subscriber_count, video_count, 
+                thumbnail_url, content_breakdown, 
+                created_at, 
+                last_updated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                subscriber_count = excluded.subscriber_count,
+                video_count = excluded.video_count,
+                thumbnail_url = excluded.thumbnail_url,
+                content_breakdown = excluded.content_breakdown,
+                last_updated = CURRENT_TIMESTAMP
+        """
+        params = (
             channel_data['id'],
             channel_data['name'],
             channel_data.get('description'),
@@ -335,7 +350,8 @@ class SQLiteStorage:
             video_count,
             thumbnail_url,
             content_breakdown
-        ))
+        )
+        cursor.execute(sql, params)
         self.conn.commit()
     
     def get_channel(self, channel_id: str):
@@ -390,14 +406,42 @@ class SQLiteStorage:
         thumbnail_url = video_data.get('thumbnail_url')
         if isinstance(thumbnail_url, dict) and 'url' in thumbnail_url:
             thumbnail_url = thumbnail_url['url']
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO videos (
+
+        # SQL for inserting a new video or updating an existing one.
+        # Fields like file_path, downloaded, etc., are given default values for the INSERT part.
+        # On conflict (update), these specific fields are NOT updated, preserving their existing values.
+        sql = """
+            INSERT INTO videos (
                 id, title, description, channel_id, channel_title, playlist_id,
                 published_at, duration, view_count, like_count,
-                thumbnail_url, is_short, is_live, status, last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (
+                thumbnail_url, is_short, is_live, status, 
+                file_path, transcript_path, downloaded, download_date,
+                last_updated
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, -- 14 fields from video_data
+                ?, ?, ?, ?,                               -- 4 fields: file_path, transcript_path, downloaded, download_date
+                CURRENT_TIMESTAMP                         -- last_updated
+            )
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                description = excluded.description,
+                -- channel_id = excluded.channel_id, -- Typically, channel_id should not change for an existing video ID.
+                channel_title = excluded.channel_title,
+                playlist_id = excluded.playlist_id, 
+                published_at = excluded.published_at,
+                duration = excluded.duration,
+                view_count = excluded.view_count,
+                like_count = excluded.like_count,
+                thumbnail_url = excluded.thumbnail_url,
+                is_short = excluded.is_short,
+                is_live = excluded.is_live,
+                status = excluded.status,
+                last_updated = CURRENT_TIMESTAMP
+            -- Columns NOT updated by this general save_video if the video already exists:
+            -- file_path, transcript_path, downloaded, download_date.
+            -- These should be updated by their specific dedicated methods.
+        """
+        params = (
             video_data['id'],
             video_data['title'],
             video_data.get('description'),
@@ -411,9 +455,82 @@ class SQLiteStorage:
             thumbnail_url,
             video_data.get('is_short', False),
             video_data.get('is_live', False),
-            video_data.get('status', 'available')
-        ))
+            video_data.get('status', 'available'),
+            video_data.get('file_path'),
+            video_data.get('transcript_path'),
+            video_data.get('downloaded', 0),
+            video_data.get('download_date') 
+        )
+        cursor.execute(sql, params)
         self.conn.commit()
+
+    def save_video_tags(self, video_id: str, tags: List[str]):
+        """
+        Saves or updates the tags for a specific video.
+        Deletes existing tag associations before adding new ones.
+
+        :param video_id: The ID of the video.
+        :param tags: A list of tag names (strings) for the video.
+        """
+        if not video_id:
+            print("Error: video_id cannot be empty when saving tags.")
+            return False # Indicate failure
+
+        cursor = self.conn.cursor()
+
+        try:
+            # 1. Check if the video actually exists
+            cursor.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,))
+            if not cursor.fetchone():
+                print(f"WARNING: Video with ID {video_id} not found. Cannot save tags.")
+                return False # Indicate failure
+
+            # 2. Delete existing tag associations for this video
+            cursor.execute("DELETE FROM video_tags WHERE video_id = ?", (video_id,))
+
+            # 3. Process and link new tags (only if tags list is provided and not empty)
+            if tags: # Proceed only if there are tags to add
+                processed_count = 0
+                for tag_name in tags:
+                    if not tag_name or not isinstance(tag_name, str):
+                        continue
+
+                    normalized_tag = tag_name.lower().strip()
+                    if not normalized_tag:
+                        continue
+
+                    # Insert tag into 'tags' table if it doesn't exist
+                    cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (normalized_tag,))
+
+                    # Get the ID of the tag
+                    cursor.execute("SELECT id FROM tags WHERE name = ?", (normalized_tag,))
+                    tag_row = cursor.fetchone()
+
+                    if tag_row:
+                        tag_id = tag_row['id']
+                        # Link video and tag in 'video_tags' table
+                        cursor.execute("INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?, ?)", (video_id, tag_id))
+                        processed_count += 1
+                    else:
+                        print(f"WARNING: Could not retrieve ID for tag '{normalized_tag}' for video {video_id}.")
+
+                print(f"Processed {processed_count} tags for video {video_id}.") # Optional logging
+            else:
+                 print(f"No new tags provided for video {video_id}. Only cleared existing tags.") # Optional logging
+
+
+            # 4. Commit the transaction
+            self.conn.commit()
+            return True # Indicate success
+
+        except sqlite3.Error as e:
+            print(f"Database error saving tags for video {video_id}: {e}")
+            self.conn.rollback() # Rollback changes on error
+            return False # Indicate failure
+        except Exception as e:
+            print(f"An unexpected error occurred saving tags for video {video_id}: {e}")
+            self.conn.rollback()
+            return False # Indicate failure
 
     def save_video_timestamps(self, video_id: str, timestamps: List[Dict[str, Any]]) -> bool:
         """
@@ -505,6 +622,99 @@ class SQLiteStorage:
         cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
         self.conn.commit()
 
+    def list_tags(self, limit: Optional[int] = None, sort_by: str = "name", sort_order: str = "ASC") -> List[str]:
+        """
+        Lists all unique tag names from the 'tags' table.
+
+        :param limit: Optional. The maximum number of tags to return.
+        :param sort_by: The column to sort by (e.g., "name", "id"). Defaults to "name".
+        :param sort_order: The order of sorting ("ASC" or "DESC"). Defaults to "ASC".
+        :return: A list of tag names.
+        """
+        cursor = self.conn.cursor()
+        # Basic validation for sort_by to prevent SQL injection if it were user-facing without sanitization
+        allowed_sort_columns = ["name", "id"]
+        if sort_by not in allowed_sort_columns:
+            sort_by = "name" # Default to a safe column
+
+        if sort_order.upper() not in ["ASC", "DESC"]:
+            sort_order = "ASC"
+
+        query = f"SELECT name FROM tags ORDER BY {sort_by} {sort_order}"
+        params = []
+
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        try:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [row['name'] for row in rows] if rows else []
+        except sqlite3.Error as e:
+            print(f"Database error listing tags: {e}")
+            return []
+        
+    def get_tags_for_video(self, video_id: str) -> List[str]:
+        """
+        Retrieves all tag names associated with a specific video.
+
+        :param video_id: The ID of the video.
+        :return: A list of tag names for the video, or an empty list if none are found or video doesn't exist.
+        """
+        cursor = self.conn.cursor()
+        query = """
+            SELECT t.name
+            FROM tags t
+            JOIN video_tags vt ON t.id = vt.tag_id
+            WHERE vt.video_id = ?
+            ORDER BY t.name ASC;
+        """
+        try:
+            cursor.execute(query, (video_id,))
+            rows = cursor.fetchall()
+            return [row['name'] for row in rows] if rows else []
+        except sqlite3.Error as e:
+            print(f"Database error getting tags for video {video_id}: {e}")
+            return []
+        
+    def get_tags_for_channel(self, channel_id: str, limit: Optional[int] = None, min_video_count: int = 1) -> List[Dict[str, Any]]:
+        """
+        Retrieves all unique tags used by videos belonging to a specific channel,
+        along with the count of videos in that channel using each tag.
+
+        :param channel_id: The ID of the channel.
+        :param limit: Optional. The maximum number of unique tags to return (ordered by most used).
+        :param min_video_count: Minimum number of videos a tag must be associated with in this channel to be included.
+        :return: A list of dictionaries, each containing 'tag_name' and 'video_count',
+                 or an empty list if no relevant tags are found.
+        """
+        cursor = self.conn.cursor()
+        query = """
+            SELECT t.name AS tag_name, COUNT(DISTINCT v.id) AS video_count
+            FROM tags t
+            JOIN video_tags vt ON t.id = vt.tag_id
+            JOIN videos v ON vt.video_id = v.id
+            WHERE v.channel_id = ?
+            GROUP BY t.name
+            HAVING COUNT(DISTINCT v.id) >= ?
+            ORDER BY video_count DESC, t.name ASC
+        """
+        params = [channel_id, min_video_count]
+
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        try:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            # Convert sqlite3.Row objects to dictionaries
+            return [dict(row) for row in rows] if rows else []
+        except sqlite3.Error as e:
+            print(f"Database error getting tags for channel {channel_id}: {e}")
+            return []
+
     def _update_video_status(self, video_id: str, status: str):
         """
         Update the status of a video.
@@ -514,7 +724,7 @@ class SQLiteStorage:
         try:
             cursor.execute("""
                 UPDATE videos SET
-                    status = ?,
+                    status = ?
                 WHERE id = ?
             """, (status, video_id))
             self.conn.commit()
@@ -544,7 +754,7 @@ class SQLiteStorage:
                 UPDATE videos SET
                     file_path = ?,
                     downloaded = 1,
-                    download_date = CURRENT_TIMESTAMP,
+                    download_date = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (file_path, video_id))
             self.conn.commit()
@@ -567,7 +777,7 @@ class SQLiteStorage:
         try:
             cursor.execute("""
                 UPDATE videos SET
-                    playlist_id = ?,
+                    playlist_id = ?
                 WHERE id = ? AND playlist_id IS NULL -- Optionally only update if not already set
             """, (playlist_id, video_id))
             self.conn.commit()
@@ -797,6 +1007,7 @@ class MediaDownloader:
                     'thumbnail_url': info.get('thumbnail'),
                     'is_short': info.get('duration', 0) < 60,
                     'is_live': info.get('is_live', False),
+                    'tags': info.get('tags', []),
                 }
                 
         except Exception as e:
@@ -1431,7 +1642,7 @@ class VideoManager:
                 # Force update if requested OR if it needs an update based on time
                 if force_update or self._needs_update(existing_video):
                     print(f"Updating video {video_id} ...")
-                    return self.update_video(video_id) # <-- Call update_video
+                    return self.update_video(video_id)
                 # Otherwise, return the existing data
                 print(f"Video {video_id} exists. Returning cached data.")
                 return dict(existing_video)
@@ -1459,9 +1670,19 @@ class VideoManager:
                      print(f"Error fetching channel {channel_id} for video {video_id}: {e}")
                      return None
             
-            # Save the fetched video info
+            # --- Save Core Video Data ---
             self.storage.save_video(video_info)
-            print(f"Successfully fetched and saved video {video_id}")
+
+            # --- Save Tags Separately ---
+            tags_to_save = video_info.get('tags', [])
+            if tags_to_save is not None: # Check if tags key exists
+                self.storage.save_video_tags(video_id, tags_to_save)
+            else:
+                # If 'tags' key was missing entirely from fetched_info
+                print(f"WARNING: 'tags' key missing from fetched info for video {video_id}. Clearing any existing tags.")
+                self.storage.save_video_tags(video_id, []) # Clear existing tags explicitly
+            
+            print(f"Successfully fetched and saved video {video_id} and its associations.")
             return video_info
 
         except Exception as e:
@@ -1497,8 +1718,18 @@ class VideoManager:
                     # If the channel cannot be fetched we won't update the video
                     return None
 
-            # Save the updated video info (this replaces the old record)
+            # --- Save Core Video Data ---
             self.storage.save_video(video_info)
+
+            # --- Save Tags Separately ---
+            tags_to_save = video_info.get('tags', [])
+            if tags_to_save is not None: # Check if tags key exists
+                self.storage.save_video_tags(video_id, tags_to_save)
+            else:
+                # If 'tags' key was missing entirely from fetched_info
+                print(f"WARNING: 'tags' key missing from fetched info for video {video_id}. Clearing any existing tags.")
+                self.storage.save_video_tags(video_id, []) # Clear existing tags explicitly
+                
             print(f"Successfully updated video {video_id} in database.")
             return video_info
 
