@@ -425,9 +425,9 @@ class SQLiteStorage:
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
-                -- channel_id = excluded.channel_id, -- Typically, channel_id should not change for an existing video ID.
+                -- channel_id = excluded.channel_id, -- channel_id should not change for an existing video ID.
                 channel_title = excluded.channel_title,
-                playlist_id = excluded.playlist_id, 
+                -- playlist_id = excluded.playlist_id, -- playlist_id should be managed by playlist processing
                 published_at = excluded.published_at,
                 duration = excluded.duration,
                 view_count = excluded.view_count,
@@ -513,8 +513,6 @@ class SQLiteStorage:
                         processed_count += 1
                     else:
                         print(f"WARNING: Could not retrieve ID for tag '{normalized_tag}' for video {video_id}.")
-
-                print(f"Processed {processed_count} tags for video {video_id}.") # Optional logging
             else:
                  print(f"No new tags provided for video {video_id}. Only cleared existing tags.") # Optional logging
 
@@ -573,7 +571,7 @@ class SQLiteStorage:
             
             # 4. Commit the transaction
             self.conn.commit()
-            print(f"Successfully saved {len(data_to_insert)} timestamps for video {video_id}.")
+            
             return True
             
         except sqlite3.Error as e:
@@ -588,6 +586,8 @@ class SQLiteStorage:
             print(f"An unexpected error occurred saving timestamps for video {video_id}: {e}")
             self.conn.rollback()
             return False
+        
+    
 
     def get_video(self, video_id: str):
         """Get video by ID"""
@@ -655,7 +655,7 @@ class SQLiteStorage:
             print(f"Database error listing tags: {e}")
             return []
         
-    def get_tags_for_video(self, video_id: str) -> List[str]:
+    def get_tags_video(self, video_id: str) -> List[str]:
         """
         Retrieves all tag names associated with a specific video.
 
@@ -678,7 +678,7 @@ class SQLiteStorage:
             print(f"Database error getting tags for video {video_id}: {e}")
             return []
         
-    def get_tags_for_channel(self, channel_id: str, limit: Optional[int] = None, min_video_count: int = 1) -> List[Dict[str, Any]]:
+    def get_tags_channel(self, channel_id: str, limit: Optional[int] = None, min_video_count: int = 1) -> List[Dict[str, Any]]:
         """
         Retrieves all unique tags used by videos belonging to a specific channel,
         along with the count of videos in that channel using each tag.
@@ -713,6 +713,31 @@ class SQLiteStorage:
             return [dict(row) for row in rows] if rows else []
         except sqlite3.Error as e:
             print(f"Database error getting tags for channel {channel_id}: {e}")
+            return []
+        
+    def get_video_timestamps(self, video_id: str) -> List[Dict[str, Any]]:
+        """
+        Retrieves all timestamps (chapters) for a specific video.
+
+        :param video_id: The ID of the video.
+        :return: A list of dictionaries, each representing a timestamp 
+                 (e.g., {'time_seconds': 0, 'description': 'Intro'}).
+                 Returns an empty list if no timestamps are found or video doesn't exist.
+        """
+        cursor = self.conn.cursor()
+        query = """
+            SELECT time_seconds, description
+            FROM timestamps
+            WHERE video_id = ?
+            ORDER BY time_seconds ASC;
+        """
+        try:
+            cursor.execute(query, (video_id,))
+            rows = cursor.fetchall()
+            # Convert sqlite3.Row objects to dictionaries
+            return [dict(row) for row in rows] if rows else []
+        except sqlite3.Error as e:
+            print(f"Database error getting timestamps for video {video_id}: {e}")
             return []
 
     def _update_video_status(self, video_id: str, status: str):
@@ -1015,7 +1040,7 @@ class MediaDownloader:
             raise
 
 
-    def get_video_chapters(self, video_id: str) -> Optional[List[Dict[str, Any]]]:
+    def get_video_timestamps(self, video_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         Extracts chapter information from a video using yt-dlp.
 
@@ -1056,7 +1081,7 @@ class MediaDownloader:
                 # If filtering removed all chapters (e.g., invalid data)
                 return None
 
-            print(f"Successfully extracted {len(formatted_chapters)} chapters for video {video_id}.")
+            print(f"Successfully extracted {len(formatted_chapters)} timestamps for video {video_id}.")
             return formatted_chapters
 
         except yt_dlp.utils.DownloadError as e:
@@ -1657,14 +1682,14 @@ class VideoManager:
             # Ensure the channel exists before saving the video
             channel_id = video_info.get('channel_id')
             if channel_id and not self.storage.channel_exists(channel_id):
-                print(f"Warning: Channel {channel_id} for video {video_id} not found in DB. Fetching channel info...")
+                print(f"WARNING: Channel {channel_id} for video {video_id} not found in DB. Fetching channel info...")
                 # Attempt to fetch and save the channel minimally
                 try:
                     channel_info = self.downloader.get_channel_info(channel_id)
                     if channel_info:
                         self.storage.save_channel(channel_info)
                     else:
-                        print(f"Warning: Could not fetch info for channel {channel_id}. Video {video_id} might lack channel context.")
+                        print(f"WARNING: Could not fetch info for channel {channel_id}. Video {video_id} might lack channel context.")
                         return None
                 except Exception as e:
                      print(f"Error fetching channel {channel_id} for video {video_id}: {e}")
@@ -1673,7 +1698,7 @@ class VideoManager:
             # --- Save Core Video Data ---
             self.storage.save_video(video_info)
 
-            # --- Save Tags Separately ---
+            # --- Save Tags ---
             tags_to_save = video_info.get('tags', [])
             if tags_to_save is not None: # Check if tags key exists
                 self.storage.save_video_tags(video_id, tags_to_save)
@@ -1682,6 +1707,14 @@ class VideoManager:
                 print(f"WARNING: 'tags' key missing from fetched info for video {video_id}. Clearing any existing tags.")
                 self.storage.save_video_tags(video_id, []) # Clear existing tags explicitly
             
+             # --- Fetch and Save Timestamps ---
+            video_timestamps = self.downloader.get_video_timestamps(video_id)
+            if video_timestamps:
+                self.storage.save_video_timestamps(video_id, video_timestamps)
+            else:
+                print(f"WARNING: No timestamps found or error fetching timestamps for video {video_id}.")
+
+
             print(f"Successfully fetched and saved video {video_id} and its associations.")
             return video_info
 
@@ -1721,7 +1754,7 @@ class VideoManager:
             # --- Save Core Video Data ---
             self.storage.save_video(video_info)
 
-            # --- Save Tags Separately ---
+            # --- Save Tags ---
             tags_to_save = video_info.get('tags', [])
             if tags_to_save is not None: # Check if tags key exists
                 self.storage.save_video_tags(video_id, tags_to_save)
@@ -1729,7 +1762,19 @@ class VideoManager:
                 # If 'tags' key was missing entirely from fetched_info
                 print(f"WARNING: 'tags' key missing from fetched info for video {video_id}. Clearing any existing tags.")
                 self.storage.save_video_tags(video_id, []) # Clear existing tags explicitly
-                
+            
+            # --- Fetch and Save Timestamps (Update) ---
+            video_timestamps = self.downloader.get_video_timestamps(video_id)
+            # save_video_timestamps already handles deleting old ones, so it's fine for updates.
+            if video_timestamps:
+                self.storage.save_video_timestamps(video_id, video_timestamps)
+            else:
+                # If no timestamps are returned, it implies either none exist or an error.
+                # save_video_timestamps with an empty list would clear existing ones.
+                # For now, let's assume if downloader returns None, we don't clear
+                print(f"No timestamps found or error fetching timestamps for video {video_id}. Clearing existing if any.")
+                #self.storage.save_video_timestamps(video_id, []) # Clears existing if none found/error
+
             print(f"Successfully updated video {video_id} in database.")
             return video_info
 
