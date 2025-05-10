@@ -473,7 +473,7 @@ class SQLiteStorage:
         :param tags: A list of tag names (strings) for the video.
         """
         if not video_id:
-            print("Error: video_id cannot be empty when saving tags.")
+            print("ERROR: video_id cannot be empty when saving tags.")
             return False # Indicate failure
 
         cursor = self.conn.cursor()
@@ -513,6 +513,11 @@ class SQLiteStorage:
                         processed_count += 1
                     else:
                         print(f"WARNING: Could not retrieve ID for tag '{normalized_tag}' for video {video_id}.")
+                
+                if processed_count > 0:
+                    print(f"Successfully saved {processed_count} tags for video {video_id}.")
+                else: 
+                    print(f"WARNING: No valid tags were processed for video {video_id} from the provided list.")
             else:
                  print(f"No new tags provided for video {video_id}. Only cleared existing tags.") # Optional logging
 
@@ -530,6 +535,7 @@ class SQLiteStorage:
             self.conn.rollback()
             return False # Indicate failure
 
+
     def save_video_timestamps(self, video_id: str, timestamps: List[Dict[str, Any]]) -> bool:
         """
         Saves video chapters/timestamps to the database.
@@ -539,10 +545,6 @@ class SQLiteStorage:
         :param timestamps: A list of dictionaries, each with 'start_time' (int) and 'title' (str).
         :return: True if saving was successful, False otherwise.
         """
-        if not timestamps:
-            print(f"No timestamps provided for video {video_id}. Nothing to save.")
-            return True # Technically successful, as there was nothing to do
-
         cursor = self.conn.cursor()
         
         try:
@@ -558,10 +560,10 @@ class SQLiteStorage:
             ]
 
             if not data_to_insert:
-                 print(f"Warning: No valid timestamp data found in the provided list for {video_id}.")
+                 print(f"WARNING: No valid timestamp data found in the provided list for {video_id}.")
                  # Still commit the delete operation
                  self.conn.commit()
-                 return False # Indicate that no valid data was inserted
+                 return True
 
             # 3. Bulk insert the new timestamps
             cursor.executemany("""
@@ -571,17 +573,14 @@ class SQLiteStorage:
             
             # 4. Commit the transaction
             self.conn.commit()
-            
+            print(f"Successfully saved {len(data_to_insert)} timestamps for video {video_id}.")
+
             return True
             
         except sqlite3.Error as e:
             print(f"Database error saving timestamps for video {video_id}: {e}")
             self.conn.rollback() # Rollback changes on error
             return False
-        except KeyError as e:
-             print(f"Data format error: Missing key {e} in timestamp data for video {video_id}.")
-             self.conn.rollback()
-             return False
         except Exception as e:
             print(f"An unexpected error occurred saving timestamps for video {video_id}: {e}")
             self.conn.rollback()
@@ -1700,20 +1699,11 @@ class VideoManager:
 
             # --- Save Tags ---
             tags_to_save = video_info.get('tags', [])
-            if tags_to_save is not None: # Check if tags key exists
-                self.storage.save_video_tags(video_id, tags_to_save)
-            else:
-                # If 'tags' key was missing entirely from fetched_info
-                print(f"WARNING: 'tags' key missing from fetched info for video {video_id}. Clearing any existing tags.")
-                self.storage.save_video_tags(video_id, []) # Clear existing tags explicitly
+            self.storage.save_video_tags(video_id, tags_to_save)
             
              # --- Fetch and Save Timestamps ---
             video_timestamps = self.downloader.get_video_timestamps(video_id)
-            if video_timestamps:
-                self.storage.save_video_timestamps(video_id, video_timestamps)
-            else:
-                print(f"WARNING: No timestamps found or error fetching timestamps for video {video_id}.")
-
+            self.storage.save_video_timestamps(video_id, video_timestamps)
 
             print(f"Successfully fetched and saved video {video_id} and its associations.")
             return video_info
@@ -1756,24 +1746,11 @@ class VideoManager:
 
             # --- Save Tags ---
             tags_to_save = video_info.get('tags', [])
-            if tags_to_save is not None: # Check if tags key exists
-                self.storage.save_video_tags(video_id, tags_to_save)
-            else:
-                # If 'tags' key was missing entirely from fetched_info
-                print(f"WARNING: 'tags' key missing from fetched info for video {video_id}. Clearing any existing tags.")
-                self.storage.save_video_tags(video_id, []) # Clear existing tags explicitly
+            self.storage.save_video_tags(video_id, tags_to_save)
             
             # --- Fetch and Save Timestamps (Update) ---
             video_timestamps = self.downloader.get_video_timestamps(video_id)
-            # save_video_timestamps already handles deleting old ones, so it's fine for updates.
-            if video_timestamps:
-                self.storage.save_video_timestamps(video_id, video_timestamps)
-            else:
-                # If no timestamps are returned, it implies either none exist or an error.
-                # save_video_timestamps with an empty list would clear existing ones.
-                # For now, let's assume if downloader returns None, we don't clear
-                print(f"No timestamps found or error fetching timestamps for video {video_id}. Clearing existing if any.")
-                #self.storage.save_video_timestamps(video_id, []) # Clears existing if none found/error
+            self.storage.save_video_timestamps(video_id, video_timestamps)
 
             print(f"Successfully updated video {video_id} in database.")
             return video_info
