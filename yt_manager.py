@@ -45,7 +45,8 @@ class YouTubeManager:
         self.downloader = MediaDownloader(download_dir)
         self.channel_manager = ChannelManager(self.storage, self.downloader)
         self.video_manager = VideoManager(self.storage, self.downloader)
-        #self.playlist_manager = PlaylistManager(self.storage, self.downloader)
+        self.playlist_manager = PlaylistManager(self.storage, self.downloader, self.video_manager)
+
 
     def process_url(self, url: str, force_update: bool = False):
         """
@@ -57,19 +58,39 @@ class YouTubeManager:
         :return: Appropriate data dictionary or raises ValueError.
         """
 
-        entity_type, entity_id = self.parser.parse_url(url)
-        
-        if entity_type == 'channel':
-            return self.channel_manager.process(entity_id, force_update=force_update)
-        elif entity_type == 'video':
-            return self.video_manager.process(entity_id, force_update=force_update)
-        elif entity_type == 'playlist':
-            return self.playlist_manager.process(entity_id)
-        elif entity_type == 'short':
-            # Shorts are just videos with a different URL format
-            return self.video_manager.process(entity_id, force_update=force_update)
+        primary_entity_type, primary_entity_id, associated_video_id, associated_playlist_id = self.parser.parse_url(url)
+        main_result = None
+
+        if primary_entity_type == 'channel':
+            main_result = self.channel_manager.process(primary_entity_id, force_update=force_update)
+
+        elif primary_entity_type == 'video':
+            main_result = self.video_manager.process(
+                video_id=primary_entity_id,
+                force_update=force_update
+            )
+            if associated_playlist_id:
+                self.playlist_manager.process(playlist_id=associated_playlist_id, force_update=force_update)
+
+        elif primary_entity_type == 'short':
+            # Shorts are processed by VideoManager
+            main_result = self.video_manager.process(
+                video_id=primary_entity_id,
+                force_update=force_update,
+                is_short=True
+            )
+            if associated_playlist_id:
+                self.playlist_manager.process(playlist_id=associated_playlist_id, force_update=force_update)
+
+        elif primary_entity_type == 'playlist':
+            main_result = self.playlist_manager.process(
+                playlist_id=primary_entity_id,
+                force_update=force_update
+            )
         else:
-            raise ValueError(f"Unknown entity type: {entity_type}")
+            raise ValueError(f"Unknown entity type: {primary_entity_type}")
+        
+        return main_result
         
 
 class InputParser:
@@ -79,18 +100,52 @@ class InputParser:
     
     def parse_url(self, url):
         """
-        Parse any YouTube URL and return (entity_type, entity_id)
+        Parse any YouTube URL.
+        Returns: (primary_entity_type, primary_entity_id, associated_video_id, associated_playlist_id)
+        - primary_entity_type: 'channel', 'video', 'playlist', 'short'
+        - primary_entity_id: The ID of the main entity determined by the URL structure.
+        - associated_video_id: Video ID if the primary entity is a playlist and URL also specified a video. Optional.
+        - associated_playlist_id: Playlist ID if the primary entity is a video/short and URL also specified a playlist. Optional.
         """
+        playlist_id_from_url = self._extract_playlist_id(url) # Extracts from 'list='
+        video_id_from_url = self._extract_video_id(url)       # Extracts from 'v='
+
+        # 1. Channel URLs are distinct.
         if 'youtube.com/channel/' in url or 'youtube.com/c/' in url or 'youtube.com/@' in url:
-            return 'channel', self._extract_channel_id(url)
-        elif 'youtube.com/watch' in url:
-            return 'video', self._extract_video_id(url)
-        elif 'youtube.com/playlist' in url:
-            return 'playlist', self._extract_playlist_id(url)
-        elif 'youtube.com/shorts/' in url:
-            return 'short', self._extract_short_id(url)
-        else:
-            raise ValueError(f"Unsupported YouTube URL format: {url}")
+            channel_id = self._extract_channel_id(url)
+            if channel_id:
+                return 'channel', channel_id, None, None
+            
+        # 2. Explicit Playlist URLs (e.g., youtube.com/playlist?list=...)
+        if 'youtube.com/playlist' in url and playlist_id_from_url:
+            # Primary entity is the playlist.
+            # video_id_from_url would be context if 'v=' was also in a /playlist URL.
+            return 'playlist', playlist_id_from_url, video_id_from_url, None
+        
+        # 3. Watch URLs (e.g., youtube.com/watch?v=...) - can also contain a playlist.
+        if 'youtube.com/watch' in url and video_id_from_url:
+            # Primary entity is the video.
+            # playlist_id_from_url is context if 'list=' was also present.
+            return 'video', video_id_from_url, None, playlist_id_from_url
+        
+        # 4. Shorts URLs (e.g., youtube.com/shorts/...)
+        if 'youtube.com/shorts/' in url:
+            short_id = self._extract_short_id(url)
+            if short_id:
+                # Primary entity is the short (treated as a video).
+                # playlist_id_from_url is context if 'list=' was also present (less common for shorts UI).
+                return 'short', short_id, None, playlist_id_from_url
+            
+        #if 'youtube.com/channel/' in url or 'youtube.com/c/' in url or 'youtube.com/@' in url:
+        #    return 'channel', self._extract_channel_id(url)
+        #elif 'youtube.com/watch' in url:
+        #    return 'video', self._extract_video_id(url)
+        #elif 'youtube.com/playlist' in url:
+        #    return 'playlist', self._extract_playlist_id(url)
+        #elif 'youtube.com/shorts/' in url:
+        #    return 'short', self._extract_short_id(url)
+        #else:
+        raise ValueError(f"Unsupported YouTube URL format: {url}")
     
     def _extract_channel_id(self, url):
         """Extract channel ID from various YouTube channel URL formats"""
@@ -551,6 +606,7 @@ class SQLiteStorage:
             # 1. Delete existing timestamps for this video
             cursor.execute("DELETE FROM timestamps WHERE video_id = ?", (video_id,))
             
+            data_to_insert = []
             # 2. Prepare data for bulk insert
             # Map the input dict keys to the table columns (time_seconds, description)
             data_to_insert = [
@@ -560,10 +616,10 @@ class SQLiteStorage:
             ]
 
             if not data_to_insert:
-                 print(f"WARNING: No valid timestamp data found in the provided list for {video_id}.")
-                 # Still commit the delete operation
-                 self.conn.commit()
-                 return True
+                print(f"WARNING: No valid timestamp data found in the provided list for {video_id}.")
+                # Still commit the delete operation
+                self.conn.commit()
+                return True
 
             # 3. Bulk insert the new timestamps
             cursor.executemany("""
@@ -847,12 +903,59 @@ class SQLiteStorage:
                 video_id = video.get('id')
                 if video_id:
                     # Use the lightweight update method
-                    if self.update_video_playlist_id(video_id, playlist_data['id']):
+                    if self._update_video_playlist_id(video_id, playlist_data['id']):
                         updated_count += 1
             
             if updated_count > 0:
                 print(f"Linked {updated_count} existing videos to playlist {playlist_data['title']}")
 
+    def get_playlist(self, playlist_id: str) -> Optional[dict]:
+        """Get playlist by ID"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    
+
+    def get_videos_by_playlist(self, playlist_id: str, limit: int = 0, offset: int = 0, sort_by: str = "published_at", sort_order: str = "DESC") -> List[dict]:
+        """
+        Get videos associated with a specific playlist from the database.
+
+        :param playlist_id: The ID of the playlist.
+        :param limit: Maximum number of videos to return. 0 or negative for no limit.
+        :param offset: Offset for pagination.
+        :param sort_by: Column to sort videos by (e.g., 'published_at', 'title', 'view_count', 'duration').
+        :param sort_order: 'ASC' or 'DESC'.
+        :return: A list of video dictionaries.
+        """
+        cursor = self.conn.cursor()
+        
+        allowed_sort_columns = ['published_at', 'title', 'view_count', 'duration', 'last_updated', 'id']
+        if sort_by not in allowed_sort_columns:
+            print(f"WARNING: Invalid sort_by column '{sort_by}' for get_videos_by_playlist. Defaulting to 'published_at'.")
+            sort_by = 'published_at'
+        
+        if sort_order.upper() not in ['ASC', 'DESC']:
+            print(f"WARNING: Invalid sort_order '{sort_order}' for get_videos_by_playlist. Defaulting to 'DESC'.")
+            sort_order = 'DESC'
+
+        query = f"SELECT * FROM videos WHERE playlist_id = ? ORDER BY {sort_by} {sort_order}"
+        params = [playlist_id]
+        
+        if limit > 0:
+            query += " LIMIT ?"
+            params.append(limit)
+            if offset > 0: # Offset typically used with limit
+                query += " OFFSET ?"
+                params.append(offset)
+        
+        try:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
+        except sqlite3.Error as e:
+            print(f"Database error in get_videos_by_playlist for playlist {playlist_id}: {e}")
+            return []
 
     def close(self):
         """Close the database connection"""
@@ -1080,7 +1183,7 @@ class MediaDownloader:
                 # If filtering removed all chapters (e.g., invalid data)
                 return None
 
-            print(f"Successfully extracted {len(formatted_chapters)} timestamps for video {video_id}.")
+            #print(f"Successfully extracted {len(formatted_chapters)} timestamps for video {video_id}.")
             return formatted_chapters
 
         except yt_dlp.utils.DownloadError as e:
@@ -1298,8 +1401,9 @@ class MediaDownloader:
         url = f"https://www.youtube.com/playlist?list={playlist_id}"
         options = {
             **self.common_options,
-            'extract_flat': True,
+            # extract_flat is True from common_options
             'playlistreverse': False,  # Keep original playlist order
+            'playlistend': 1000,      # Attempt to retrieve all playlist items
         }
         
         try:
@@ -1311,14 +1415,18 @@ class MediaDownloader:
                 
                 # Extract basic playlist information
                 playlist_data = {
-                    'id': playlist_id,
-                    'title': info.get('title', 'Unknown Playlist'),
-                    'description': info.get('description', ''),
-                    'channel_id': info.get('channel_id', None),
-                    'channel_title': info.get('channel', None) or info.get('uploader', None),
-                    'modified_date': info.get('modified_date', None),
-                    'video_count': info.get('playlist_count', 0),
-                    'videos': []
+                    'id': info.get('id', playlist_id), # Primary key for playlists table
+                    'title': info.get('title', 'Unknown Playlist'), # For playlists table
+                    'description': info.get('description', ''),    # For playlists table
+                    'channel_id': info.get('channel_id'),          # For playlists table (FOREIGN KEY)
+                    'video_count': info.get('playlist_count'),     # For playlists table
+                    'modified_date': info.get('modified_date'),    # For playlists table (TEXT YYYYMMDD)
+                    
+                    # Additional contextual information (not directly in 'playlists' table but useful)
+                    'channel_title': info.get('channel') or info.get('uploader'),
+                    'uploader_id': info.get('uploader_id'),
+
+                    'videos': [] # List of lightweight video dicts
                 }
                 
                 # Process all entries (videos) in the playlist
@@ -1331,16 +1439,15 @@ class MediaDownloader:
                         if not video_id:
                             continue
                             
-                        # Create a lightweight video object
-                        video = {
+                        # Lightweight video object for the roster
+                        video_entry_data = {
                             'id': video_id,
-                            'title': entry.get('title', 'Unknown video'),
-                            'playlist_id': playlist_id,  # Add reference to playlist
+                            'title': entry.get('title', 'Unknown Video'),
                             'duration': entry.get('duration', 0),
-                            'upload_date': entry.get('upload_date'),
+                            'url': entry.get('url'), # Useful for direct access or later processing
                         }
                         
-                        playlist_data['videos'].append(video)
+                        playlist_data['videos'].append(video_entry_data)
                 
                 return playlist_data
                 
@@ -1893,3 +2000,127 @@ class VideoManager:
             except Exception as e:
                 print(f"An unexpected error occurred in VideoManager.download_video for {video_id}: {str(e)}")
                 return None
+            
+
+class PlaylistManager:
+    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, video_manager: VideoManager):
+        """
+        Initialize PlaylistManager.
+
+        :param storage: SQLiteStorage instance for data persistence.
+        :param downloader: MediaDownloader instance for fetching data.
+        :param video_manager: VideoManager instance for processing videos within playlists.
+        """
+        self.storage = storage
+        self.downloader = downloader
+        self.video_manager = video_manager
+
+    
+    def process(self, playlist_id: str, force_update: bool = False) -> Optional[dict]:
+        """
+        Process a playlist: fetch info if needed, store in database, process its videos, and return data.
+        Returns None if the playlist cannot be processed or found.
+
+        :param playlist_id: YouTube playlist ID.
+        :param force_update: If True, force update regardless of last update time. Defaults to False.
+        :return: Playlist information dictionary or None.
+        """
+        try:
+            existing_playlist = self.storage.get_playlist(playlist_id)
+            if existing_playlist and not force_update and not self._needs_update(existing_playlist):
+                print(f"Playlist {playlist_id} exists. Returning cached data.")
+                return dict(existing_playlist)
+
+            if existing_playlist and (force_update or self._needs_update(existing_playlist)):
+                print(f"Updating playlist {playlist_id}...")
+                # Fall through to fetch and update logic
+            elif not existing_playlist:
+                print(f"Playlist {playlist_id} not found in DB. Fetching...")
+
+            # Fetch playlist info from YouTube
+            playlist_info = self.downloader.get_playlist_info(playlist_id)
+            if not playlist_info:
+                print(f"Could not fetch info for playlist {playlist_id}")
+                return None
+
+            # Ensure the playlist's channel exists
+            channel_id = playlist_info.get('channel_id')
+            if channel_id and not self.storage.channel_exists(channel_id):
+                print(f"WARNING: Channel {channel_id} for playlist {playlist_id} not found. Processing channel...")
+                try:
+                    # Minimal channel processing.
+                    channel_data = self.downloader.get_channel_info(channel_id)
+                    if channel_data:
+                        self.storage.save_channel(channel_data)
+                    else:
+                        print(f"WARNING: Could not fetch channel {channel_id} for playlist {playlist_id}. Playlist may lack full context.")
+                except Exception as e_ch:
+                    print(f"Error fetching channel {channel_id} for playlist {playlist_id}: {e_ch}")
+                    # Decide if playlist processing should fail if channel fetch fails. For now, continue.
+
+            # Save the playlist's own metadata
+            self.storage.save_playlist(playlist_info) # This saves playlist-level details
+            print(f"Successfully saved/updated playlist metadata for {playlist_id}.")
+
+            # Process and link videos within the playlist
+            videos_in_playlist = playlist_info.get('videos', [])
+            processed_video_count = 0
+            linked_video_count = 0
+
+            print(f"Starting processing videos from playlist {playlist_id}...")
+            for video_entry in videos_in_playlist:
+                video_id = video_entry.get('id')
+                if not video_id:
+                    continue
+
+                video_details = self.video_manager.process(video_id, force_update=force_update)
+
+                if video_details:
+                    processed_video_count += 1
+                    # Link this video to the current playlist
+                    # The `save_video` in `VideoManager` does NOT update playlist_id on conflict.
+                    if self.storage._update_video_playlist_id(video_id, playlist_id):
+                        linked_video_count +=1
+                else:
+                    print(f"Failed to process video {video_id} from playlist {playlist_id}.")
+            
+            print(f"Processed {processed_video_count} videos for playlist {playlist_id}. Linked {linked_video_count} videos.")
+
+            # Update the video_count in the playlist record based on actual linked videos if desired,
+            # or trust the count from playlist_info. For now, yt-dlp's count is saved.
+
+            return self.storage.get_playlist(playlist_id) # Return data from DB
+
+        except Exception as e:
+            print(f"Error processing playlist {playlist_id}: {str(e)}")
+            return None
+        
+    
+    def _needs_update(self, existing_playlist: dict, days: int = 30) -> bool:
+        """
+        Determine if a playlist needs to be updated.
+        Checks 'last_updated' (our DB timestamp) and 'modified_date' (from YouTube if available).
+
+        :param existing_playlist: Existing playlist data from database (as dict).
+        :param days: Number of days after which our DB record is considered stale for a general refresh.
+        :return: bool: True if playlist needs update, False otherwise.
+        """
+        last_updated_str = existing_playlist.get('last_updated')
+        #youtube_modified_date_str = existing_playlist.get('modified_date') # YYYYMMDD format
+
+        if not last_updated_str:
+            print(f"Playlist {existing_playlist.get('id')} missing 'last_updated' timestamp. Needs update.")
+            return True
+
+        try:
+            # Check our internal last_updated timestamp
+            # Assuming last_updated_str is in '%Y-%m-%d %H:%M:%S' format from SQLite
+            last_updated_dt = datetime.strptime(last_updated_str, '%Y-%m-%d %H:%M:%S')
+            if (datetime.now() - last_updated_dt).days > days:
+                print(f"Playlist {existing_playlist.get('id')} DB record is older than {days} days. Needs update.")
+                return True
+            
+            return False
+        except Exception as e:
+            print(f"Error parsing timestamp for playlist {existing_playlist.get('id')}: {str(e)}. Assuming update needed.")
+            return True
