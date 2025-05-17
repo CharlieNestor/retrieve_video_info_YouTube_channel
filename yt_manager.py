@@ -574,7 +574,8 @@ class SQLiteStorage:
                 else: 
                     print(f"WARNING: No valid tags were processed for video {video_id} from the provided list.")
             else:
-                 print(f"No new tags provided for video {video_id}. Only cleared existing tags.") # Optional logging
+                # No new tags were provided as input.
+                print(f"WARNING: No new tags provided for video {video_id}.")
 
 
             # 4. Commit the transaction
@@ -605,6 +606,12 @@ class SQLiteStorage:
         try:
             # 1. Delete existing timestamps for this video
             cursor.execute("DELETE FROM timestamps WHERE video_id = ?", (video_id,))
+
+            # Handle cases where timestamps might be None or empty
+            if not timestamps: # Checks for None or empty list
+                print(f"WARNING: No timestamps provided or found for video {video_id}. Existing timestamps (if any) cleared.")
+                self.conn.commit() # Commit the delete operation
+                return True
             
             data_to_insert = []
             # 2. Prepare data for bulk insert
@@ -916,8 +923,60 @@ class SQLiteStorage:
         row = cursor.fetchone()
         return dict(row) if row else None
     
+    def list_playlists(self, limit: Optional[int] = None, sort_by: str = "title", sort_order: str = "ASC", channel_id: Optional[str] = None) -> List[dict]:
+        """
+        Lists playlists from the database.
 
-    def get_videos_by_playlist(self, playlist_id: str, limit: int = 0, offset: int = 0, sort_by: str = "published_at", sort_order: str = "DESC") -> List[dict]:
+        :param limit: Optional. The maximum number of playlists to return.
+        :param sort_by: The column to sort by (e.g., "title", "id", "channel_id", "video_count", "modified_date", "last_updated"). Defaults to "title".
+        :param sort_order: The order of sorting ("ASC" or "DESC"). Defaults to "ASC".
+        :param channel_id: Optional. Filter playlists by a specific channel ID.
+        :return: A list of playlist dictionaries (id, title, channel_id, video_count, modified_date, last_updated).
+        """
+        cursor = self.conn.cursor()
+        
+        allowed_sort_columns = ["id", "title", "channel_id", "video_count", "modified_date", "last_updated"]
+        if sort_by not in allowed_sort_columns:
+            print(f"WARNING: Invalid sort_by column '{sort_by}' for list_playlists. Defaulting to 'title'.")
+            sort_by = "title"
+
+        if sort_order.upper() not in ["ASC", "DESC"]:
+            print(f"WARNING: Invalid sort_order '{sort_order}' for list_playlists. Defaulting to 'ASC'.")
+            sort_order = "ASC"
+
+        db_sort_column = "p.title" # Default
+        if sort_by == "title":
+            db_sort_column = "p.title"
+        elif sort_by == "id":
+            db_sort_column = "p.id"
+        elif sort_by == "video_count":
+            db_sort_column = "p.video_count"
+        elif sort_by == "channel_title":
+            db_sort_column = "c.name"
+
+        query = "SELECT p.id, p.title, c.name AS channel_title, p.video_count FROM playlists p JOIN channels c ON p.channel_id = c.id"
+        params = []
+
+        if channel_id:
+            query += " WHERE channel_id = ?"
+            params.append(channel_id)
+        
+        query += f" ORDER BY {db_sort_column} {sort_order.upper()}"
+
+        if limit is not None and limit > 0:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        try:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
+        except sqlite3.Error as e:
+            print(f"Database error listing playlists: {e}")
+            return []
+    
+
+    def get_playlist_videos(self, playlist_id: str, limit: int = 0, offset: int = 0, sort_by: str = "published_at", sort_order: str = "DESC") -> List[dict]:
         """
         Get videos associated with a specific playlist from the database.
 
@@ -930,16 +989,19 @@ class SQLiteStorage:
         """
         cursor = self.conn.cursor()
         
-        allowed_sort_columns = ['published_at', 'title', 'view_count', 'duration', 'last_updated', 'id']
+        essential_fields = ['id', 'title', 'duration', 'published_at']
+        select_columns = ", ".join(essential_fields)
+
+        allowed_sort_columns = essential_fields 
         if sort_by not in allowed_sort_columns:
-            print(f"WARNING: Invalid sort_by column '{sort_by}' for get_videos_by_playlist. Defaulting to 'published_at'.")
+            print(f"WARNING: Invalid sort_by column '{sort_by}' for get_playlist_videos. It must be one of {allowed_sort_columns}. Defaulting to 'published_at'.")
             sort_by = 'published_at'
         
         if sort_order.upper() not in ['ASC', 'DESC']:
             print(f"WARNING: Invalid sort_order '{sort_order}' for get_videos_by_playlist. Defaulting to 'DESC'.")
             sort_order = 'DESC'
 
-        query = f"SELECT * FROM videos WHERE playlist_id = ? ORDER BY {sort_by} {sort_order}"
+        query = f"SELECT {select_columns} FROM videos WHERE playlist_id = ? ORDER BY {sort_by} {sort_order.upper()}"
         params = [playlist_id]
         
         if limit > 0:
@@ -1165,8 +1227,8 @@ class MediaDownloader:
             chapters = info.get('chapters')
 
             if not chapters:
-                # No chapters found, which is not an error, just lack of data.
-                return None
+                # No chapters found by yt-dlp, which is not an error, just lack of data.
+                return [] # Return empty list
 
             formatted_chapters = []
             for chapter in chapters:
@@ -1181,7 +1243,7 @@ class MediaDownloader:
 
             if not formatted_chapters:
                 # If filtering removed all chapters (e.g., invalid data)
-                return None
+                return [] # Return empty list
 
             #print(f"Successfully extracted {len(formatted_chapters)} timestamps for video {video_id}.")
             return formatted_chapters
@@ -1745,6 +1807,32 @@ class ChannelManager:
         else:
             print("Video search not implemented in storage")
             return []
+        
+    def delete_channel_data(self, channel_id: str) -> bool:
+        """
+        Deletes a channel and all its associated data (videos, playlists, tags, timestamps)
+        from the database.
+
+        :param channel_id: The ID of the channel to delete.
+        :return: True if deletion was successful, False otherwise.
+        """
+        if not channel_id:
+            print("ERROR: channel_id cannot be empty for deletion.")
+            return False
+        
+        if not self.storage.channel_exists(channel_id):
+            print(f"Channel {channel_id} not found in database. Nothing to delete.")
+            return False
+            
+        try:
+            # The cascade option in SQLiteStorage.delete_channel handles associated videos.
+            # The schema's ON DELETE CASCADE handles playlists, video_tags, and timestamps.
+            self.storage.delete_channel(channel_id, cascade=True)
+            print(f"Successfully deleted channel {channel_id} and all its associated data.")
+            return True
+        except Exception as e:
+            print(f"Error deleting channel {channel_id}: {str(e)}")
+            return False
 
 
 class VideoManager:
@@ -1833,7 +1921,7 @@ class VideoManager:
             if not video_info:
                 print(f"WARNING: Failed to fetch updated info for video {video_id}, downloader returned None.")
                 # Update status to indicate fetch failure during update
-                self.storage._update_video_status(video_id, 'update_fetch_failed')
+                self.storage._update_video_status(video_id, 'unavailable')
                 return None
 
             # Ensure channel exists (minimal check/fetch, don't force update channel)
@@ -1864,7 +1952,7 @@ class VideoManager:
 
         except Exception as e:
             print(f"Error updating video {video_id}: {str(e)}")
-            self.storage._update_video_status(video_id, 'update_processing_error')
+            self.storage._update_video_status(video_id, 'update_error')
             return None
         
     def _needs_update(self, existing_video: dict, days: int = 30) -> bool:
@@ -2000,6 +2088,30 @@ class VideoManager:
             except Exception as e:
                 print(f"An unexpected error occurred in VideoManager.download_video for {video_id}: {str(e)}")
                 return None
+            
+    def delete_video_data(self, video_id: str) -> bool:
+        """
+        Deletes a video and its associated data (tags, timestamps) from the database.
+
+        :param video_id: The ID of the video to delete.
+        :return: True if deletion was successful, False otherwise.
+        """
+        if not video_id:
+            print("ERROR: video_id cannot be empty for deletion.")
+            return False
+
+        if not self.storage.video_exists(video_id):
+            print(f"Video {video_id} not found in database. Nothing to delete.")
+            return False
+            
+        try:
+            # The schema's ON DELETE CASCADE for video_tags and timestamps handles associations.
+            self.storage.delete_video(video_id)
+            print(f"Successfully deleted video {video_id} and its associated data.")
+            return True
+        except Exception as e:
+            print(f"Error deleting video {video_id}: {str(e)}")
+            return False
             
 
 class PlaylistManager:
