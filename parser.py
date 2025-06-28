@@ -43,7 +43,7 @@ class InputParser:
             return 'channel', channel_id, None, None
             
         # 2. Playlist is next priority
-        if playlist_id and 'youtube.com/playlist' in url:
+        if playlist_id and 'youtube.com/playlist' in url:   # Ensure it's mainly a playlist URL
             return 'playlist', playlist_id, video_id, None
         
         # 3. Video is next priority
