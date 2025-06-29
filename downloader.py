@@ -15,19 +15,7 @@ class MediaDownloader:
         :param download_dir: Directory where videos will be downloaded.
                             If None, uses the system's Downloads folder.
         """
-        # Get the download directory
-        if download_dir is None:
-            # Get the system's Downloads folder
-            if os.name == 'nt':  # Windows
-                download_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
-            elif os.name == 'posix':  # macOS/Linux
-                download_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
-            else:
-                # Fallback to home directory if OS not recognized
-                download_dir = os.path.expanduser('~')
-
         self.download_dir = os.path.abspath(download_dir)
-        os.makedirs(self.download_dir, exist_ok=True)
         self._filename_sanitizer = None # Temporary storage for hook result
         
         # Common yt-dlp options

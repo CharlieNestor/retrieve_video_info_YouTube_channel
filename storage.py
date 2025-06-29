@@ -1087,7 +1087,50 @@ class SQLiteStorage:
         except sqlite3.Error as e:
             print(f"Database error in get_videos_by_playlist for playlist {playlist_id}: {e}")
             return []
+    
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """
+        Delete playlist from database.
+        This removes the playlist metadata and its video associations, 
+        but preserves the individual video and channel records.
         
+        Due to ON DELETE CASCADE constraint on playlist_videos table,
+        all playlist-video associations will be automatically removed.
+        
+        :param playlist_id: The unique identifier of the playlist to be deleted
+        :return: True if deletion was successful, False otherwise
+        """
+        # Check if the playlist exists first
+        if not self._playlist_exists(playlist_id):
+            print(f"WARNING: Playlist ID {playlist_id} does not exist in the database.")
+            return False
+        
+        cursor = self.conn.cursor()
+        
+        try:
+            # Get playlist info for logging before deletion
+            playlist_info = self.get_playlist(playlist_id)
+            playlist_title = playlist_info.get('title', 'Unknown') if playlist_info else 'Unknown'
+            
+            # Delete the playlist - CASCADE will handle playlist_videos associations
+            cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+            
+            if cursor.rowcount > 0:
+                self.conn.commit()
+                print(f"Successfully deleted playlist '{playlist_title}' ({playlist_id}) and its associations.")
+                return True
+            else:
+                print(f"WARNING: No playlist was deleted for ID {playlist_id}.")
+                return False
+                
+        except sqlite3.Error as e:
+            print(f"Database error deleting playlist {playlist_id}: {e}")
+            self.conn.rollback()
+            return False
+        except Exception as e:
+            print(f"Unexpected error deleting playlist {playlist_id}: {e}")
+            self.conn.rollback()
+            return False
 
     def close(self):
         """
