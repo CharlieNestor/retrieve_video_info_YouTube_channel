@@ -199,6 +199,14 @@ class PlaylistManager:
             print(f"Error retrieving videos for playlist {playlist_id}: {str(e)}")
             return []
         
+    def list_playlists(self) -> list:
+        """
+        Retrieves a list of all playlists from the database.
+
+        :return: A list of playlist dictionaries.
+        """
+        return self.storage.list_playlists()
+
     def delete_playlist(self, playlist_id: str) -> bool:
         """
         Delete playlist from database.

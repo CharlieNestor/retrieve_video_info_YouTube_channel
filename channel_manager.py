@@ -131,6 +131,23 @@ class ChannelManager:
             return True
         
     
+    def get_channel(self, channel_id: str) -> dict:
+        """
+        Retrieves a single channel's data from the database.
+
+        :param channel_id: The YouTube channel ID.
+        :return: A dictionary containing the channel's data, or None if not found.
+        """
+        return self.storage.get_channel(channel_id)
+
+    def list_channels(self) -> list:
+        """
+        Retrieves a list of all channels from the database.
+
+        :return: A list of channel dictionaries.
+        """
+        return self.storage.list_channels()
+
     def get_channel_videos(self, channel_id: str, limit: int = 100, sort_by: str = 'published_at') -> list:
         """
         Retrieve videos associated with a specific YouTube channel from the database.

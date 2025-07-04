@@ -128,6 +128,24 @@ class VideoManager:
             self.storage._update_video_status(video_id, 'update_error')
             return None
         
+    def get_video(self, video_id: str) -> dict:
+        """
+        Retrieves a single video's data from the database.
+
+        :param video_id: The YouTube video ID.
+        :return: A dictionary containing the video's data, or None if not found.
+        """
+        return self.storage.get_video(video_id)
+
+    def list_channel_videos(self, channel_id: str) -> list:
+        """
+        Retrieves a list of all videos for a specific channel from the database.
+
+        :param channel_id: The YouTube channel ID.
+        :return: A list of video dictionaries.
+        """
+        return self.storage.list_channel_videos(channel_id)
+
     def download_video(self, video_id: str, force_download: bool=False) -> str:
             """
             Downloads a video file, updates its status in the database, 
