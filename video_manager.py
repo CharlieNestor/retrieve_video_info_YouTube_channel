@@ -1,19 +1,68 @@
 import os
+from datetime import datetime, timedelta
 from storage import SQLiteStorage
 from downloader import MediaDownloader
 from channel_manager import ChannelManager
 
 
 class VideoManager:
-    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader):
+    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, update_threshold_days: int = 30):
         """
         Initialize VideoManager
         
         :param storage: SQLiteStorage instance for data persistence
         :param downloader: MediaDownloader instance for fetching data
+        :param update_threshold_days: The number of days after which video data is considered stale.
         """
         self.storage = storage
         self.downloader = downloader
+        self.update_threshold_days = update_threshold_days
+
+    def _needs_update(self, existing_video: dict) -> bool:
+        """
+        Determines if a video needs updating based on its last update timestamp.
+        
+        :param existing_video: Existing video data from database
+        :return: bool: True if video needs update, False otherwise
+        """
+        if 'last_updated' not in existing_video.keys() or not existing_video['last_updated']:
+            return True # Needs update if timestamp is missing
+            
+        # Convert string timestamp to datetime
+        try:
+            # SQLite CURRENT_TIMESTAMP format: "YYYY-MM-DD HH:MM:SS"
+            # Parse the timestamp to datetime object
+            last_updated_str = existing_video['last_updated']
+            
+            # SQLite stores timestamps in "YYYY-MM-DD HH:MM:SS" format by default
+            if ' ' in last_updated_str and ':' in last_updated_str:
+                # Standard SQLite format from CURRENT_TIMESTAMP
+                last_updated = datetime.strptime(last_updated_str, '%Y-%m-%d %H:%M:%S')
+            elif 'T' in last_updated_str:  # ISO format with T separator
+                if last_updated_str.endswith('Z'):
+                    # ISO format with Z timezone indicator
+                    last_updated_str = last_updated_str.replace('Z', '+00:00')
+                last_updated = datetime.fromisoformat(last_updated_str)
+            else:
+                # Unexpected format - log and assume update is needed
+                print(f"Unexpected timestamp format: {last_updated_str}")
+                return True
+            
+            # Get current time
+            now = datetime.now()
+
+            # Calculate time difference
+            time_difference = now - last_updated
+            update_threshold_seconds = self.update_threshold_days * 24 * 60 * 60
+
+            needs_update = time_difference.total_seconds() > update_threshold_seconds
+            if needs_update:
+                print(f"Video {existing_video.get('id')} needs update. Last updated: {last_updated_str} ({time_difference.days} days ago).")
+            return needs_update
+        except Exception as e:
+            print(f"Error parsing timestamp: {str(e)}")
+            # If we can't parse the timestamp, better to update
+            return True
 
     
     def process(self, video_id: str, force_update: bool = False) -> dict:

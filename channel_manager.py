@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from storage import SQLiteStorage
 from downloader import MediaDownloader
 from datetime import datetime
@@ -5,7 +6,7 @@ from datetime import datetime
 
 class ChannelManager:
 
-    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader):
+    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, update_threshold_days: int = 7):
         """
         Initialize the ChannelManager with storage and downloader dependencies.
         The ChannelManager handles operations related to YouTube channels including
@@ -13,9 +14,12 @@ class ChannelManager:
         
         :param storage: SQLiteStorage instance for data persistence operations
         :param downloader: MediaDownloader instance for fetching data from YouTube API
+        :param update_threshold_days: The number of days after which channel data is considered stale.
         """
         self.storage = storage
         self.downloader = downloader
+        self.update_threshold_days = update_threshold_days
+        self.update_threshold_days = update_threshold_days
 
     
     def process(self, channel_id: str, force_update: bool = False) -> dict:
@@ -81,12 +85,11 @@ class ChannelManager:
             raise
 
     
-    def _needs_update(self, existing_channel: dict, days: int = 30) -> bool:
+    def _needs_update(self, existing_channel: dict) -> bool:
         """
         Determines if a channel needs updating based on its last update timestamp.
         
         :param existing_channel: Existing channel data from database
-        :param days: Days threshold before considering an update necessary
         :return: bool: True if channel needs update, False otherwise
         """
         if 'last_updated' not in existing_channel.keys() or not existing_channel['last_updated']:
@@ -117,7 +120,7 @@ class ChannelManager:
 
             # Calculate time difference
             time_difference = now - last_updated
-            update_threshold_seconds = days * 24 * 60 * 60
+            update_threshold_seconds = self.update_threshold_days * 24 * 60 * 60
 
             needs_update = time_difference.total_seconds() > update_threshold_seconds
             if needs_update:

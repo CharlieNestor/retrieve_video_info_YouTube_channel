@@ -7,17 +7,19 @@ from typing import Dict, Any, Union, List
 
 class PlaylistManager:
 
-    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, video_manager: VideoManager):
+    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, video_manager: VideoManager, update_threshold_days: int = 30):
         """
         Initialize PlaylistManager.
 
         :param storage: SQLiteStorage instance for data persistence.
         :param downloader: MediaDownloader instance for fetching data.
         :param video_manager: VideoManager instance for processing videos within playlists.
+        :param update_threshold_days: The number of days after which playlist data is considered stale.
         """
         self.storage = storage
         self.downloader = downloader
         self.video_manager = video_manager
+        self.update_threshold_days = update_threshold_days
 
     
     def process(self, playlist_id: str, force_update: bool = False, verbose: bool = False) -> Union[dict, None]:
@@ -50,7 +52,7 @@ class PlaylistManager:
 
             # Ensure the playlist's channel exists
             channel_id = playlist_info.get('channel_id')
-            if channel_id and not self.storage.channel_exists(channel_id):
+            if channel_id and not self.storage._channel_exists(channel_id):
                 print(f"WARNING: Channel {channel_id} for playlist {playlist_id} not found. Processing channel...")
                 try:
                     # Minimal channel processing.
@@ -63,14 +65,9 @@ class PlaylistManager:
                     print(f"Error fetching channel {channel_id} for playlist {playlist_id}: {e_ch}")
                     # Decide if playlist processing should fail if channel fetch fails. For now, continue.
 
-            # Save the playlist's own metadata
-            self.storage.save_playlist(playlist_info) # This saves playlist-level details
-            print(f"Successfully saved/updated playlist metadata for {playlist_id}.")
-
             # Process and link videos within the playlist
             videos_in_playlist = playlist_info.get('videos', [])
             processed_video_count = 0
-            linked_video_count = 0
             failed_video_count = 0
             total_videos = len(videos_in_playlist)
 
@@ -93,8 +90,6 @@ class PlaylistManager:
 
                         if video_details:
                             processed_video_count += 1
-                            # Note: Video-playlist association is already handled by save_playlist()
-                            linked_video_count +=1
                         else:
                             failed_video_count += 1
                             print(f"Failed to process video {video_id} from playlist {playlist_id}.")
@@ -110,6 +105,10 @@ class PlaylistManager:
             else:
                 print(f"No videos found in playlist {playlist_id}. Nothing to process.")
 
+            # Save the playlist's own metadata
+            self.storage.save_playlist(playlist_info) # This saves playlist-level details
+            print(f"Successfully saved/updated playlist metadata for {playlist_id}.")
+
             # Update the video_count in the playlist record based on actual linked videos if desired,
             # or trust the count from playlist_info. For now, yt-dlp's count is saved.
 
@@ -120,31 +119,48 @@ class PlaylistManager:
             return None
         
     
-    def _needs_update(self, existing_playlist: dict, days: int = 30) -> bool:
+    def _needs_update(self, existing_playlist: dict) -> bool:
         """
         Determine if a playlist needs to be updated.
         Checks 'last_updated' (our DB timestamp) and 'modified_date' (from YouTube if available).
 
         :param existing_playlist: Existing playlist data from database (as dict).
-        :param days: Number of days after which our DB record is considered stale for a general refresh.
         :return: bool: True if playlist needs update, False otherwise.
         """
         last_updated_str = existing_playlist.get('last_updated')
-        #youtube_modified_date_str = existing_playlist.get('modified_date') # YYYYMMDD format
 
         if not last_updated_str:
             print(f"Playlist {existing_playlist.get('id')} missing 'last_updated' timestamp. Needs update.")
             return True
 
         try:
-            # Check our internal last_updated timestamp
-            # Assuming last_updated_str is in '%Y-%m-%d %H:%M:%S' format from SQLite
-            last_updated_dt = datetime.strptime(last_updated_str, '%Y-%m-%d %H:%M:%S')
-            if (datetime.now() - last_updated_dt).days > days:
-                print(f"Playlist {existing_playlist.get('id')} DB record is older than {days} days. Needs update.")
+            # SQLite CURRENT_TIMESTAMP format: "YYYY-MM-DD HH:MM:SS"
+            # Parse the timestamp to datetime object
+            if ' ' in last_updated_str and ':' in last_updated_str:
+                # Standard SQLite format from CURRENT_TIMESTAMP
+                last_updated = datetime.strptime(last_updated_str, '%Y-%m-%d %H:%M:%S')
+            elif 'T' in last_updated_str:  # ISO format with T separator
+                if last_updated_str.endswith('Z'):
+                    # ISO format with Z timezone indicator
+                    last_updated_str = last_updated_str.replace('Z', '+00:00')
+                last_updated = datetime.fromisoformat(last_updated_str)
+            else:
+                # Unexpected format - log and assume update is needed
+                print(f"Unexpected timestamp format for playlist {existing_playlist.get('id')}: {last_updated_str}")
                 return True
             
-            return False
+            # Get current time
+            now = datetime.now()
+
+            # Calculate time difference
+            time_difference = now - last_updated
+            update_threshold_seconds = self.update_threshold_days * 24 * 60 * 60
+
+            needs_update = time_difference.total_seconds() > update_threshold_seconds
+            if needs_update:
+                print(f"Playlist {existing_playlist.get('id')} DB record is older than {self.update_threshold_days} days. Needs update. Last updated: {last_updated_str} ({time_difference.days} days ago).")
+            
+            return needs_update
         except Exception as e:
             print(f"Error parsing timestamp for playlist {existing_playlist.get('id')}: {str(e)}. Assuming update needed.")
             return True
