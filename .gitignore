@@ -22,3 +22,6 @@ logs/
 
 # OS-specific
 .DS_Store
+
+# .ipynb files
+demo.ipynb

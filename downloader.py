@@ -154,6 +154,51 @@ class MediaDownloader:
             print(f"Error fetching channel info: {str(e)}")
             raise
 
+    def get_channel_video_list(self, channel_id: str) -> List[Dict[str, Any]]:
+        """
+        Efficiently retrieves a list of all videos, shorts, and live streams for a given channel.
+
+        Uses yt-dlp's flat extraction to get a lightweight list of video
+        titles and IDs without fetching full metadata for each video. It queries
+        the 'Videos', 'Shorts', and 'Live' tabs of the channel page to ensure
+        all content is discovered.
+
+        :param channel_id: The YouTube channel ID.
+        :return: A list of dictionaries, each containing 'id' and 'title'.
+        """
+        content_tabs = ['videos', 'shorts', 'live']
+        all_videos = {} # Use a dict to automatically handle duplicates by video ID
+
+        options = {
+            **self.common_options,
+            'extract_flat': 'in_playlist',
+        }
+
+        with yt_dlp.YoutubeDL(options) as ydl:
+            for tab in content_tabs:
+                url = f"https://www.youtube.com/channel/{channel_id}/{tab}"
+                try:
+                    info = ydl.extract_info(url, download=False)
+                    if 'entries' in info and info['entries']:
+                        for entry in info['entries']:
+                            if entry and entry.get('id'):
+                                # Use video ID as key to prevent duplicates
+                                all_videos[entry['id']] = {
+                                    'id': entry.get('id'),
+                                    'title': entry.get('title'),
+                                }
+                except yt_dlp.utils.DownloadError as e:
+                    # It's common for a channel to not have a 'shorts' or 'live' tab,
+                    # resulting in a 404. We can safely ignore these errors.
+                    if 'HTTP Error 404' in str(e):
+                        print(f"Info: Channel {channel_id} has no '{tab}' tab. Skipping.")
+                    else:
+                        print(f"Warning: yt-dlp error on tab '{tab}' for channel {channel_id}: {e}")
+                except Exception as e:
+                    print(f"Error fetching channel video list for tab '{tab}' on channel {channel_id}: {e}")
+
+        return list(all_videos.values())
+
     def get_video_info(self, video_id: str) -> Dict[str, Any]:
         """
         Extract detailed YouTube video metadata using yt-dlp.
@@ -311,6 +356,7 @@ class MediaDownloader:
         except Exception as e:
             print(f"Error fetching playlist info: {str(e)}")
             raise
+
 
     # TODO: Implement get_video_transcript method
     # TODO: Implement method to get the list of online available video for a channel

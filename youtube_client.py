@@ -10,6 +10,7 @@ from downloader import MediaDownloader
 from channel_manager import ChannelManager
 from video_manager import VideoManager
 from playlist_manager import PlaylistManager
+from library_manager import LibraryManager
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -58,8 +59,12 @@ class YouTubeClient:
 
         # 3. Initialize high-level "manager" components by injecting dependencies
         self.channel_manager = ChannelManager(self.storage, self.downloader)
-        self.video_manager = VideoManager(self.storage, self.downloader)
+        self.video_manager = VideoManager(self.storage, self.downloader, self.channel_manager)
         self.playlist_manager = PlaylistManager(self.storage, self.downloader, self.video_manager)
+        self.library_manager = LibraryManager(storage=self.storage, download_dir=download_dir, video_manager=self.video_manager, downloader=self.downloader)
+
+        # 4. Sync library on startup
+        #self.library_manager.sync_library()
 
     def process_url(self, url: str, force_update: bool = False) -> dict:
         """
