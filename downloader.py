@@ -166,8 +166,10 @@ class MediaDownloader:
         :param channel_id: The YouTube channel ID.
         :return: A list of dictionaries, each containing 'id' and 'title'.
         """
-        content_tabs = ['videos', 'shorts', 'live']
         all_videos = {} # Use a dict to automatically handle duplicates by video ID
+
+        # Always check the standard tabs for videos, shorts, and streams.
+        content_tabs = ['videos', 'shorts', 'streams']
 
         options = {
             **self.common_options,
@@ -188,11 +190,13 @@ class MediaDownloader:
                                     'title': entry.get('title'),
                                 }
                 except yt_dlp.utils.DownloadError as e:
-                    # It's common for a channel to not have a 'shorts' or 'live' tab,
-                    # resulting in a 404. We can safely ignore these errors.
-                    if 'HTTP Error 404' in str(e):
-                        print(f"Info: Channel {channel_id} has no '{tab}' tab. Skipping.")
+                    # It's expected that a channel may not have a 'streams' or other tabs.
+                    # We can safely ignore these specific errors and continue.
+                    error_str = str(e).lower()
+                    if 'no videos found in this tab' in error_str or 'the channel is not currently live' in error_str:
+                        pass  # Silently ignore expected errors.
                     else:
+                        # For any other download error, we should still print a warning.
                         print(f"Warning: yt-dlp error on tab '{tab}' for channel {channel_id}: {e}")
                 except Exception as e:
                     print(f"Error fetching channel video list for tab '{tab}' on channel {channel_id}: {e}")

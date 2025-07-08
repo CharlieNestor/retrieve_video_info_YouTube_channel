@@ -32,7 +32,6 @@ class LibraryManager:
         self.video_manager = video_manager
         self.downloader = downloader
 
-    
     def _extract_video_duration(self, file_path: str) -> Optional[float]:
         """
         Extract duration from local .mp4 file using ffprobe.
@@ -54,8 +53,40 @@ class LibraryManager:
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, ValueError, FileNotFoundError):
             return None
 
+    def sync_library(self, title_threshold: float = 0.8, duration_threshold_seconds: float = 10.0):
+        """
+        Synchronizes the local library with the database in a single pipeline.
 
-    def scan_local_library(self, path: Optional[str] = None) -> Dict[str, Any]:
+        This method orchestrates the four main steps:
+        1. Scans the local library for video files.
+        2. Checks for exact matches in the database.
+        3. Resolves unknown files using fuzzy matching against YouTube.
+        4. Updates the database with the results.
+
+        :param title_threshold: Minimum title similarity for fuzzy matching (0.0-1.0).
+        :param duration_threshold_seconds: Maximum duration difference for fuzzy matching.
+        """
+        # Step 1: Scan local library
+        local_library = self._scan_local_library()
+
+        # Step 2: Check for exact matches and get unknown files
+        exact_match_results = self._check_exact_matches(local_library)
+        unknown_files = exact_match_results.get('unknown_files', [])
+        
+        if not unknown_files:
+            return
+
+        # Step 3: Resolve unknown files
+        resolved_files = self._resolve_unknown_files(
+            unknown_files,
+            title_threshold=title_threshold,
+            duration_threshold_seconds=duration_threshold_seconds
+        )
+        
+        # Step 4: Update database from resolved files
+        self._update_database_from_resolved_files(resolved_files)
+    
+    def _scan_local_library(self, path: Optional[str] = None) -> Dict[str, Any]:
         """
         Step 1: Scan the local library for video files.
         
@@ -117,68 +148,17 @@ class LibraryManager:
         return library
     
 
-    def _process_channel_files(self, channel_id: str, channel_data: Dict, db_videos: List[Dict]) -> Dict:
-        """
-        Processes all local files for a single channel against its database videos.
-        
-        :param channel_id: The ID of the channel being processed.
-        :param channel_data: The local library data for the channel.
-        :param db_videos: The list of video records from the database for this channel.
-        :return: A dictionary containing lists of 'exact_matches' and 'unknown_files'.
-        """
-        channel_results = {'exact_matches': [], 'unknown_files': []}
-        
-        if not db_videos:
-            # No videos in DB for this channel - all files are unknown
-            for video in channel_data['videos']:
-                channel_results['unknown_files'].append({
-                    'channel_id': channel_id,
-                    'channel_name': channel_data['name'],
-                    **video,
-                })
-            return channel_results
-
-        # Create mapping for O(1) lookup
-        db_videos_map = {v['title']: v for v in db_videos}
-
-        for video in channel_data['videos']:
-            if video['title'] in db_videos_map:
-                # EXACT match found
-                matched_video = db_videos_map[video['title']]
-                needs_update = (
-                    not matched_video.get('downloaded') or
-                    matched_video.get('file_path') != video['path']
-                )
-                
-                match_info = {
-                    'channel_id': channel_id,
-                    'channel_name': channel_data['name'],
-                    'local_file': video,
-                    'db_video': matched_video,
-                    'needs_update': needs_update
-                }
-                channel_results['exact_matches'].append(match_info)
-            else:
-                # No exact match - add to unknown files
-                channel_results['unknown_files'].append({
-                    'channel_id': channel_id,
-                    'channel_name': channel_data['name'],
-                    **video,
-                })
-        
-        return channel_results
-
-    def check_exact_matches(self, library: Optional[Dict] = None) -> Dict[str, List]:
+    def _check_exact_matches(self, library: Optional[Dict] = None) -> Dict[str, List]:
         """
         Step 2: Check local files against database using EXACT title matching ONLY.
         
         Identifies matches and then updates database records in a separate step.
 
-        :param library: Result from scan_local_library() (will scan if None)
+        :param library: Result from _scan_local_library() (will scan if None)
         :return: Dictionary with exact matches and unknown files
         """
         if library is None:
-            library = self.scan_local_library()
+            library = self._scan_local_library()
         
         total_files = sum(len(channel['videos']) for channel in library.values())
         print(f"Checking {total_files} local files for EXACT matches in database...")
@@ -230,13 +210,13 @@ class LibraryManager:
         
         return results
     
-    def resolve_unknown_files(self, unknown_files: List[Dict], 
+    def _resolve_unknown_files(self, unknown_files: List[Dict], 
                         title_threshold: float = 0.8, 
                         duration_threshold_seconds: float = 10.0) -> List[Dict]:
         """
         Step 3: Find YouTube video IDs for unknown files using channel + title + duration matching.
         
-        :param unknown_files: List of unknown files from check_exact_matches()
+        :param unknown_files: List of unknown files from _check_exact_matches()
         :param title_threshold: Minimum title similarity (0.0-1.0)
         :param duration_threshold_seconds: Maximum duration difference in seconds. This is also used as the scale for scoring.
         :return: List of files with resolved video_ids
@@ -294,8 +274,146 @@ class LibraryManager:
         print(f"Resolution complete: Matched {matched_count} of {len(resolved_files)} files.")
         return resolved_files
     
-    
+    def _update_database_from_resolved_files(self, resolved_files: List[Dict]) -> Dict:
+        """
+        Step 4: Update the database based on the results of the fuzzy-matching resolution.
+
+        This method takes the resolved files, checks their status against the database,
+        and performs the necessary actions:
+        - Creates new video records for newly discovered videos.
+        - Updates existing records that are out of sync.
+        - Skips records that are already perfectly synchronized.
+
+        :param resolved_files: The list of files processed by _resolve_unknown_files().
+        :return: A dictionary summarizing the actions taken.
+        """
+        if not self.video_manager:
+            print("Error: VideoManager is not available. Cannot process new videos.")
+            return {}
+            
+        print(f"Syncing {len(resolved_files)} resolved files with the database...")
         
+        stats = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
+
+        for file_info in resolved_files:
+            video_id = file_info.get('video_id')
+            local_path = file_info.get('path')
+
+            # Skip if the file could not be matched to a YouTube video
+            if not video_id:
+                continue
+
+            try:
+                # Check if this video already exists in our database
+                db_video = self.storage.get_video(video_id)
+
+                if db_video:
+                    # --- Scenario A: Video exists in the database ---
+                    # Check if the existing record needs to be updated.
+                    is_downloaded = db_video.get('downloaded', 0)
+                    db_path = db_video.get('file_path', '')
+
+                    if not is_downloaded or db_path != local_path:
+                        print(f"Updating existing record for video: {video_id}")
+                        self.storage._update_video_download_status(video_id, local_path)
+                        stats['updated'] += 1
+                    else:
+                        # The record is already perfect, no action needed.
+                        stats['skipped'] += 1
+                
+                else:
+                    # --- Scenario B: New video discovered ---
+                    # 1. Process the video to fetch all metadata and create the record.
+                    print(f"Processing new video to database: {video_id}")
+                    self.video_manager.process(video_id)
+                    
+                    # 2. Update the newly created record to mark it as downloaded.
+                    print(f"Updating download status for new video: {video_id}")
+                    self.storage._update_video_download_status(video_id, local_path)
+                    stats['created'] += 1
+
+            except Exception as e:
+                print(f"ERROR: Failed to sync video {video_id}. Reason: {e}")
+                stats['failed'] += 1
+        
+        print("\nDatabase synchronization complete.")
+        print(f"  Created: {stats['created']}")
+        print(f"  Updated: {stats['updated']}")
+        print(f"  Skipped: {stats['skipped']}")
+        print(f"  Failed:  {stats['failed']}")
+        
+        return stats
+        
+    def _process_channel_files(self, channel_id: str, channel_data: Dict, db_videos: List[Dict]) -> Dict:
+        """
+        Processes all local files for a single channel against its database videos.
+        
+        :param channel_id: The ID of the channel being processed.
+        :param channel_data: The local library data for the channel.
+        :param db_videos: The list of video records from the database for this channel.
+        :return: A dictionary containing lists of 'exact_matches' and 'unknown_files'.
+        """
+        channel_results = {'exact_matches': [], 'unknown_files': []}
+        
+        if not db_videos:
+            # No videos in DB for this channel - all files are unknown
+            for video in channel_data['videos']:
+                channel_results['unknown_files'].append({
+                    'channel_id': channel_id,
+                    'channel_name': channel_data['name'],
+                    **video,
+                })
+            return channel_results
+
+        # Create mapping for O(1) lookup
+        db_videos_map = {v['title']: v for v in db_videos}
+
+        for video in channel_data['videos']:
+            if video['title'] in db_videos_map:
+                # EXACT match found
+                matched_video_id = db_videos_map[video['title']]['id']
+                # Fetch the necessary video record details to get download status and file path
+                db_video_details = self.storage.get_video(matched_video_id) # This returns the full dict
+
+                if db_video_details:
+                    needs_update = (
+                        not db_video_details.get('downloaded') or 
+                        db_video_details.get('file_path') != video['path']
+                    )
+
+                    # Construct db_video with only the relevant fields for match_info
+                    relevant_db_info = {
+                        'id': db_video_details['id'],
+                        'file_path': db_video_details.get('file_path'),
+                        'downloaded': db_video_details.get('downloaded')
+                    }
+
+                    match_info = {
+                        'channel_id': channel_id,
+                        'channel_name': channel_data['name'],
+                        'local_file': video,
+                        'db_video': relevant_db_info, # Store only relevant info
+                        'needs_update': needs_update
+                    }
+                    channel_results['exact_matches'].append(match_info)
+                else:
+                    # This case should ideally not happen if db_videos_map is accurate,
+                    # but handle it by treating as unknown if full record can't be fetched.
+                    channel_results['unknown_files'].append({
+                        'channel_id': channel_id,
+                        'channel_name': channel_data['name'],
+                        **video,
+                    })
+            else:
+                # No exact match - add to unknown files
+                channel_results['unknown_files'].append({
+                    'channel_id': channel_id,
+                    'channel_name': channel_data['name'],
+                    **video,
+                })
+        
+        return channel_results
+
     def _find_best_youtube_match(self, file_info: Dict, youtube_videos: List[Dict], 
                            title_threshold: float, duration_threshold_seconds: float) -> Dict:
         """
@@ -385,74 +503,4 @@ class LibraryManager:
             best_match['match_reason'] = f'No match above thresholds (title >= {title_threshold}, duration <= {duration_threshold_seconds}s)'
         
         return best_match
-        
-    def update_database_from_resolved_files(self, resolved_files: List[Dict]) -> Dict:
-        """
-        Step 4: Update the database based on the results of the fuzzy-matching resolution.
-
-        This method takes the resolved files, checks their status against the database,
-        and performs the necessary actions:
-        - Creates new video records for newly discovered videos.
-        - Updates existing records that are out of sync.
-        - Skips records that are already perfectly synchronized.
-
-        :param resolved_files: The list of files processed by resolve_unknown_files().
-        :return: A dictionary summarizing the actions taken.
-        """
-        if not self.video_manager:
-            print("Error: VideoManager is not available. Cannot process new videos.")
-            return {}
-            
-        print(f"Syncing {len(resolved_files)} resolved files with the database...")
-        
-        stats = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
-
-        for file_info in resolved_files:
-            video_id = file_info.get('video_id')
-            local_path = file_info.get('path')
-
-            # Skip if the file could not be matched to a YouTube video
-            if not video_id:
-                continue
-
-            try:
-                # Check if this video already exists in our database
-                db_video = self.storage.get_video(video_id)
-
-                if db_video:
-                    # --- Scenario A: Video exists in the database ---
-                    # Check if the existing record needs to be updated.
-                    is_downloaded = db_video.get('downloaded', 0)
-                    db_path = db_video.get('file_path', '')
-
-                    if not is_downloaded or db_path != local_path:
-                        print(f"Updating existing record for video: {video_id}")
-                        self.storage._update_video_download_status(video_id, local_path)
-                        stats['updated'] += 1
-                    else:
-                        # The record is already perfect, no action needed.
-                        stats['skipped'] += 1
-                
-                else:
-                    # --- Scenario B: New video discovered ---
-                    # 1. Process the video to fetch all metadata and create the record.
-                    print(f"Processing new video to database: {video_id}")
-                    self.video_manager.process(video_id)
-                    
-                    # 2. Update the newly created record to mark it as downloaded.
-                    print(f"Updating download status for new video: {video_id}")
-                    self.storage._update_video_download_status(video_id, local_path)
-                    stats['created'] += 1
-
-            except Exception as e:
-                print(f"ERROR: Failed to sync video {video_id}. Reason: {e}")
-                stats['failed'] += 1
-        
-        print("\nDatabase synchronization complete.")
-        print(f"  Created: {stats['created']}")
-        print(f"  Updated: {stats['updated']}")
-        print(f"  Skipped: {stats['skipped']}")
-        print(f"  Failed:  {stats['failed']}")
-        
-        return stats
         
