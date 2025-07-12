@@ -86,7 +86,12 @@ class PlaylistManager:
                         print(f"Processing video: {video_id}")
 
                     try:
-                        video_details = self.video_manager.process(video_id, force_update=force_update)
+                        # Pass the playlist's channel_id to ensure video ownership.
+                        video_details = self.video_manager.process(
+                            video_id,
+                            force_update=force_update,
+                            expected_channel_id=channel_id
+                        )
 
                         if video_details:
                             processed_video_count += 1

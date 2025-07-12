@@ -6,16 +6,18 @@ from channel_manager import ChannelManager
 
 
 class VideoManager:
-    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, update_threshold_days: int = 30):
+    def __init__(self, storage: SQLiteStorage, downloader: MediaDownloader, channel_manager: ChannelManager, update_threshold_days: int = 30):
         """
         Initialize VideoManager
         
         :param storage: SQLiteStorage instance for data persistence
         :param downloader: MediaDownloader instance for fetching data
+        :param channel_manager: ChannelManager instance for handling channel-related operations.
         :param update_threshold_days: The number of days after which video data is considered stale.
         """
         self.storage = storage
         self.downloader = downloader
+        self.channel_manager = channel_manager
         self.update_threshold_days = update_threshold_days
 
     def _needs_update(self, existing_video: dict) -> bool:
@@ -65,70 +67,66 @@ class VideoManager:
             return True
 
     
-    def process(self, video_id: str, force_update: bool = False) -> dict:
+    def process(self, video_id: str, force_update: bool = False, expected_channel_id: str = None) -> dict:
         """
-        Process a video: fetch info if needed, store in database, return data.
-        Returns None if the video cannot be processed or found.
-        
-        :param video_id: YouTube video ID
+        Process a video: fetch info, store in database, return data.
+        If an expected_channel_id is provided, the video will be skipped if
+        it does not belong to that channel.
+
+        :param video_id: YouTube video ID to process.
         :param force_update: If True, force update regardless of last update time. Defaults to False.
-        :return: dict: Video information or None
+        :param expected_channel_id: Optional. If provided, ensures the video belongs to this channel.
+        :return: Dictionary with video information or None if skipped or failed.
         """
-        if not isinstance(video_id, str):
-            raise ValueError("video_id must be a string")
+        # If an expected channel is provided, we must validate ownership before proceeding.
+        if expected_channel_id:
+            # To validate, we need the video's actual channel ID. We must fetch it from the downloader.
+            video_info_for_check = self.downloader.get_video_info(video_id)
+            if not video_info_for_check:
+                print(f"Could not fetch info for video {video_id} to validate channel ownership.")
+                return None # Cannot proceed without video info
 
-        try:
-            existing_video = self.storage.get_video(video_id)
-            if existing_video:
-                # Force update if requested OR if it needs an update based on time
-                if force_update or self._needs_update(existing_video):
-                    print(f"Updating video {video_id} ...")
-                    return self.update_video(video_id)
-                # Otherwise, return the existing data
-                print(f"Video {video_id} exists. Returning cached data.")
-                return existing_video
+            actual_channel_id = video_info_for_check.get('channel_id')
+            if actual_channel_id != expected_channel_id:
+                print(f"WARNING: Skipping video {video_id}. It belongs to channel '{actual_channel_id}' but was expected in playlist from channel '{expected_channel_id}'.")
+                return None
 
-            # Video doesn't exist in DB, fetch it
-            print(f"Video {video_id} not found in DB. Fetching...")
-            video_info = self.downloader.get_video_info(video_id)
-            if not video_info:
-                print(f"Could not fetch info for video {video_id}")
-                return None # Indicate failure to fetch
+        # Check if we need to update
+        existing_video = self.storage.get_video(video_id)
+        if existing_video:
+            if force_update or self._needs_update(existing_video):
+                print(f"Updating video {video_id}...")
+                return self.update_video(video_id)
 
-            # Ensure the channel exists before saving the video
-            channel_id = video_info.get('channel_id')
-            if channel_id and not self.storage._channel_exists(channel_id):
-                print(f"WARNING: Channel {channel_id} for video {video_id} not found in DB. Fetching channel info...")
-                # Attempt to fetch and save the channel minimally
-                try:
-                    channel_info = self.downloader.get_channel_info(channel_id)
-                    if channel_info:
-                        self.storage.save_channel(channel_info)
-                    else:
-                        print(f"WARNING: Could not fetch info for channel {channel_id}. Video {video_id} might lack channel context.")
-                        return None
-                except Exception as e:
-                     print(f"Error fetching channel {channel_id} for video {video_id}: {e}")
-                     return None
-            
-            # --- Save Core Video Data ---
-            self.storage.save_video(video_info)
+            print(f"Video {video_id} exists. Returning cached data.")
+            return existing_video
 
-            # --- Save Tags ---
-            tags_to_save = video_info.get('tags', [])
-            self.storage.save_video_tags(video_id, tags_to_save)
-            
-             # --- Fetch and Save Timestamps ---
-            video_timestamps = self.downloader.get_video_timestamps(video_id)
-            self.storage.save_video_timestamps(video_id, video_timestamps)
+        # Video doesn't exist in DB, fetch it
+        print(f"Video {video_id} not found in DB. Fetching...")
+        video_info = self.downloader.get_video_info(video_id)
+        if not video_info:
+            print(f"Could not fetch info for video {video_id}")
+            return None
 
-            print(f"Successfully fetched and saved video {video_id} and its associations.")
-            return video_info
+        # If channel doesn't exist, fetch and save it
+        channel_id = video_info.get('channel_id')
+        if channel_id and not self.storage._channel_exists(channel_id):
+            print(f"WARNING: Channel {channel_id} for video {video_id} not found in DB. Fetching channel info...")
+            self.channel_manager.process(channel_id)
 
-        except Exception as e:
-            print(f"Error processing video {video_id}: {str(e)}")
-            # Potentially re-raise or handle specific exceptions
-            return None # Indicate failure
+        # --- Save Core Video Data ---
+        self.storage.save_video(video_info)
+
+        # --- Save Tags ---
+        tags_to_save = video_info.get('tags', [])
+        self.storage.save_video_tags(video_id, tags_to_save)
+
+        # --- Fetch and Save Timestamps ---
+        video_timestamps = self.downloader.get_video_timestamps(video_id)
+        self.storage.save_video_timestamps(video_id, video_timestamps)
+
+        print(f"Successfully fetched and saved video {video_id} and its associations.")
+        return video_info
         
     def update_video(self, video_id: str) -> dict:
         """
@@ -151,8 +149,7 @@ class VideoManager:
             if channel_id and not self.storage.channel_exists(channel_id):
                 print(f"Warning: Channel {channel_id} for video {video_id} not found during update. Fetching channel info...")
                 try:
-                    channel_manager = ChannelManager(self.storage, self.downloader)
-                    channel_manager.process(channel_id, force_update=False) # Don't force channel update
+                    self.channel_manager.process(channel_id, force_update=False) # Don't force channel update
                 except Exception as e:
                     print(f"Error fetching/processing channel {channel_id} during video update: {e}")
                     # If the channel cannot be fetched we won't update the video
