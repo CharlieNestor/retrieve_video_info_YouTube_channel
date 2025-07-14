@@ -180,6 +180,91 @@ class ChannelManager:
         
         return videos
     
+    def get_online_video_list(self, channel_id: str) -> list:
+        """
+        Fetches a list of all videos for a channel directly from YouTube.
+
+        This method provides a way to see all available videos on the channel's
+        page, regardless of whether they are stored in the local database.
+
+        :param channel_id: The YouTube channel ID.
+        :return: A list of dictionaries, each containing video 'id' and 'title'.
+        """
+        if not channel_id:
+            print("ERROR: channel_id cannot be empty.")
+            return []
+        
+        try:
+            return self.downloader.get_channel_video_list(channel_id)
+        except Exception as e:
+            print(f"Error fetching online video list for channel {channel_id}: {str(e)}")
+            return []
+
+    def get_channel_tags(self, channel_id: str, limit: int = None, min_video_count: int = 1) -> list:
+        """
+        Retrieves unique tags for a channel from the local database.
+
+        This method aggregates all unique tags from the videos of a specific
+        channel that have been saved locally. It can also count how many
+        videos are associated with each tag.
+
+        :param channel_id: The ID of the channel.
+        :param limit: Optional. The maximum number of unique tags to return.
+        :param min_video_count: The minimum number of videos a tag must be
+                                associated with to be included.
+        :return: A list of dictionaries, each with 'tag_name' and 'video_count'.
+        """
+        if not channel_id:
+            print("ERROR: channel_id cannot be empty.")
+            return []
+            
+        try:
+            return self.storage.get_tags_channel(
+                channel_id, 
+                limit=limit, 
+                min_video_count=min_video_count
+            )
+        except Exception as e:
+            print(f"Error getting tags for channel {channel_id}: {str(e)}")
+            return []
+
+    def get_video_download_states(self, channel_id: str) -> dict:
+        """
+        Categorizes videos for a channel into downloaded and not downloaded lists.
+
+        This method efficiently queries the database to get the download status
+        for all videos of a given channel and returns them in a structured format.
+
+        :param channel_id: The YouTube channel ID.
+        :return: A dictionary with two keys, 'downloaded' and 'not_downloaded',
+                 each containing a list of video dictionaries ('id', 'title').
+        """
+        if not channel_id:
+            print("ERROR: channel_id cannot be empty.")
+            return {"downloaded": [], "not_downloaded": []}
+
+        try:
+            all_videos = self.storage.get_videos_with_download_status(channel_id)
+            
+            downloaded_videos = []
+            not_downloaded_videos = []
+
+            for video in all_videos:
+                video_info = {'id': video['id'], 'title': video['title']}
+                if video['downloaded'] == 1:
+                    downloaded_videos.append(video_info)
+                else:
+                    not_downloaded_videos.append(video_info)
+            
+            return {
+                "downloaded": downloaded_videos,
+                "not_downloaded": not_downloaded_videos
+            }
+
+        except Exception as e:
+            print(f"Error getting video download states for channel {channel_id}: {str(e)}")
+            return {"downloaded": [], "not_downloaded": []}
+    
     # TODO: Add method to search videos by title, description, tags, etc.
     
     def delete_channel(self, channel_id: str) -> bool:

@@ -431,6 +431,31 @@ class SQLiteStorage:
         except Exception as e:
             print(f"Error getting channel videos: {e}")
             return []
+
+    def get_videos_with_download_status(self, channel_id: str) -> List[Dict]:
+        """
+        Retrieves a list of all videos for a channel, including their download status.
+
+        This is an efficient query that fetches the id, title, and downloaded flag
+        for all videos of a specific channel in a single database call.
+
+        :param channel_id: The YouTube channel ID.
+        :return: A list of dictionaries, each containing 'id', 'title', and 'downloaded'.
+        """
+        if not self._channel_exists(channel_id):
+            print(f"WARNING: Channel with ID {channel_id} does not exist.")
+            return []
+
+        cursor = self.conn.cursor()
+        query = "SELECT id, title, downloaded FROM videos WHERE channel_id = ? ORDER BY published_at DESC"
+        
+        try:
+            cursor.execute(query, (channel_id,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
+        except Exception as e:
+            print(f"Error getting videos with download status: {e}")
+            return []
         
     def _update_video_status(self, video_id: str, status: str) -> bool:
         """
