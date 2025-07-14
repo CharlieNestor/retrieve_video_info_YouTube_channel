@@ -24,4 +24,7 @@ logs/
 .DS_Store
 
 # .ipynb files
-demo.ipynb
+demo_yt_client.ipynb
+
+# .py files
+demo_yt_client.py

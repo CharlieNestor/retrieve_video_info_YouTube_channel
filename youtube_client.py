@@ -66,6 +66,21 @@ class YouTubeClient:
         # 4. Sync library on startup
         #self.library_manager.sync_library()
 
+    def __enter__(self):
+        """
+        Enter the runtime context related to this object.
+        This will be called when using the 'with' statement.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """
+        Exit the runtime context and close the database connection.
+        This ensures that the connection is closed even if errors occur.
+        """
+        print("Closing database connection.")
+        self.storage.close()
+
     def process_url(self, url: str, force_update: bool = False) -> dict:
         """
         Processes any given YouTube URL (channel, video, playlist, or short).
@@ -121,9 +136,4 @@ class YouTubeClient:
             print(f"An unexpected error occurred in the client: {e}")
             raise
 
-    def close_connection(self):
-        """
-        Closes the database connection gracefully.
-        """
-        print("Closing database connection.")
-        self.storage.close()
+    
