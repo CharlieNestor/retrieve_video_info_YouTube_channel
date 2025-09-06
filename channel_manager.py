@@ -162,10 +162,9 @@ class ChannelManager:
         :return: list: List of video dictionaries containing video metadata,
                 sorted by date (newest first) or empty list if none found
         """
-        # Verify channel exists
+        # Verify channel exists first, and raise an error if it does not.
         if not self.storage._channel_exists(channel_id):
-            print(f"WARNING: Channel {channel_id} not found in database.")
-            return []
+            raise ValueError(f"Channel with id '{channel_id}' not found.")
         
         # Delegate the call to the storage layer.
         videos = self.storage.list_channel_videos(
@@ -179,6 +178,29 @@ class ChannelManager:
             return []
         
         return videos
+    
+    def get_channel_playlists(self, channel_id: str, limit: int = None, sort_by: str = "title") -> list:
+        """
+        Retrieves a list of all playlists for a channel from the database.
+
+        :param channel_id: The YouTube channel ID.
+        :param limit: Optional. The maximum number of playlists to return.
+        :param sort_by: The column to sort by. Valid values are 'title', 'video_count'.
+        :return: A list of dictionaries, each containing playlist 'id' and 'title'.
+        """
+        if not channel_id:
+            print("ERROR: channel_id cannot be empty.")
+            return []
+        
+        try:
+            return self.storage.list_playlists(
+                channel_id=channel_id,
+                limit=limit,
+                sort_by=sort_by
+            )
+        except Exception as e:
+            print(f"Error getting playlists for channel {channel_id}: {str(e)}")
+            return []
     
     def get_online_video_list(self, channel_id: str) -> list:
         """

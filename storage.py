@@ -41,7 +41,7 @@ class SQLiteStorage:
         Establish connection to SQLite database with foreign key support.
         Sets row_factory to sqlite3.Row for dictionary-like access to results.
         """
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         # Enable foreign key constraints
         self.conn.execute("PRAGMA foreign_keys = ON")
         # Return dictionaries instead of tuples
@@ -275,13 +275,10 @@ class SQLiteStorage:
                 query += " ORDER BY name"
         if limit:
             query += f" LIMIT {limit}"
-        try:
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
-        except Exception as e:
-            print(f"Error listing channels: {e}")
-            return []
+
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows] if rows else []
         
     def delete_channel(self, channel_id: str):
         """
