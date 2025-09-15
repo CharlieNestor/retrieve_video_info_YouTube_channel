@@ -981,11 +981,6 @@ class SQLiteStorage:
         :param playlist_id: The unique identifier of the playlist
         :return: Dictionary containing playlist information or None if not found
         """
-        # Check if the playlist exists first
-        if not self._playlist_exists(playlist_id):
-            print(f"WARNING: Playlist with ID {playlist_id} does not exist.")
-            return None
-        # Fetch playlist details from the database
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
         row = cursor.fetchone()
@@ -1046,13 +1041,9 @@ class SQLiteStorage:
             query += " LIMIT ?"
             params.append(limit)
         
-        try:
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
-        except sqlite3.Error as e:
-            print(f"Database error listing playlists: {e}")
-            return []
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows] if rows else []
         
     
     def get_playlist_videos(self, playlist_id: str, limit: int = None, sort_by: str = "position") -> List[dict]:
@@ -1066,8 +1057,7 @@ class SQLiteStorage:
         """
         # Check if the playlist exists first
         if not self._playlist_exists(playlist_id):
-            print(f"WARNING: Playlist with ID {playlist_id} does not exist.")
-            return []
+            raise ValueError(f"Playlist with ID '{playlist_id}' not found.")
         
         cursor = self.conn.cursor()
         
@@ -1102,13 +1092,9 @@ class SQLiteStorage:
             query += " LIMIT ?"
             params.append(limit)
         
-        try:
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
-        except sqlite3.Error as e:
-            print(f"Database error in get_videos_by_playlist for playlist {playlist_id}: {e}")
-            return []
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows] if rows else []
     
     def delete_playlist(self, playlist_id: str) -> bool:
         """
@@ -1120,39 +1106,25 @@ class SQLiteStorage:
         all playlist-video associations will be automatically removed.
         
         :param playlist_id: The unique identifier of the playlist to be deleted
-        :return: True if deletion was successful, False otherwise
+        :return: True if deletion was successful.
+        :raises ValueError: If the playlist does not exist.
         """
-        # Check if the playlist exists first
+        # This check is necessary to signal "not found" as a distinct error.
         if not self._playlist_exists(playlist_id):
-            print(f"WARNING: Playlist ID {playlist_id} does not exist in the database.")
-            return False
-        
+            raise ValueError(f"Playlist with ID '{playlist_id}' not found.")
+
         cursor = self.conn.cursor()
         
-        try:
-            # Get playlist info for logging before deletion
-            playlist_info = self.get_playlist(playlist_id)
-            playlist_title = playlist_info.get('title', 'Unknown') if playlist_info else 'Unknown'
-            
-            # Delete the playlist - CASCADE will handle playlist_videos associations
-            cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
-            
-            if cursor.rowcount > 0:
-                self.conn.commit()
-                print(f"Successfully deleted playlist '{playlist_title}' ({playlist_id}) and its associations.")
-                return True
-            else:
-                print(f"WARNING: No playlist was deleted for ID {playlist_id}.")
-                return False
-                
-        except sqlite3.Error as e:
-            print(f"Database error deleting playlist {playlist_id}: {e}")
-            self.conn.rollback()
-            return False
-        except Exception as e:
-            print(f"Unexpected error deleting playlist {playlist_id}: {e}")
-            self.conn.rollback()
-            return False
+        # This action can raise sqlite3.Error, which will now correctly propagate.
+        cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        self.conn.commit()
+        
+        if cursor.rowcount > 0:
+            print(f"Successfully deleted playlist {playlist_id} and its associations.")
+            return True
+        
+        # This case should not be reached if _playlist_exists passed, but is a safeguard.
+        return False
 
     def close(self):
         """

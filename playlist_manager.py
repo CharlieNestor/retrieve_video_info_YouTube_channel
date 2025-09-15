@@ -177,21 +177,9 @@ class PlaylistManager:
         :param playlist_id: YouTube playlist ID
         :return: Playlist information dictionary or None if not found
         """
-        if not playlist_id:
-            print("ERROR: playlist_id cannot be empty.")
-            return None
-            
-        try:
-            playlist_data = self.storage.get_playlist(playlist_id)
-            if not playlist_data:
-                print(f"Playlist {playlist_id} not found in database.")
-                return None
-                
-            return playlist_data
-            
-        except Exception as e:
-            print(f"Error retrieving playlist {playlist_id}: {str(e)}")
-            return None
+        # Directly call the storage method.
+        # It will return None if not found, and any database exceptions will propagate up.
+        return self.storage.get_playlist(playlist_id)
         
         
     def get_playlist_videos(self, playlist_id: str, limit: int = None, sort_by: str = "position") -> List[dict]:
@@ -203,22 +191,9 @@ class PlaylistManager:
         :param sort_by: Sort videos by 'position', 'published_at', or 'title'
         :return: List of video dictionaries
         """
-        if not playlist_id:
-            print("ERROR: playlist_id cannot be empty.")
-            return []
-            
-        try:
-            videos = self.storage.get_playlist_videos(playlist_id, limit=limit, sort_by=sort_by)
-            
-            if not videos:
-                print(f"No videos found for playlist {playlist_id}")
-                return []
-                
-            return videos
-            
-        except Exception as e:
-            print(f"Error retrieving videos for playlist {playlist_id}: {str(e)}")
-            return []
+        # Directly call the storage method.
+        # It will raise ValueError if not found, and any database exceptions will propagate up.
+        return self.storage.get_playlist_videos(playlist_id, limit=limit, sort_by=sort_by)
         
     def list_playlists(self) -> list:
         """
@@ -234,25 +209,11 @@ class PlaylistManager:
         NOTE: This only removes the playlist metadata and associations, not the individual video records.
         
         :param playlist_id: YouTube playlist ID to delete
-        :return: True if deletion was successful, False otherwise
+        :return: True if deletion was successful.
+        :raises ValueError: If the playlist_id is empty or not found in storage.
         """
         if not playlist_id:
-            print("ERROR: playlist_id cannot be empty for deletion.")
-            return False
-            
-        # Check if playlist exists
-        existing_playlist = self.get_playlist(playlist_id)
-        if not existing_playlist:
-            print(f"Playlist {playlist_id} not found in database. Nothing to delete.")
-            return False
-            
-        try:
-            # Note: Assuming storage has a delete_playlist method
-            # This should be implemented in storage.py similar to delete_channel
-            success = self.storage.delete_playlist(playlist_id)
-            print(f"Successfully deleted playlist {playlist_id}")
-            return success
-            
-        except Exception as e:
-            print(f"Error deleting playlist {playlist_id}: {str(e)}")
-            return False
+            raise ValueError("Playlist ID cannot be empty.")
+
+        # Directly call the storage method. It will raise exceptions on failure.
+        return self.storage.delete_playlist(playlist_id)
