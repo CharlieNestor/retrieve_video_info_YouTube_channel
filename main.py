@@ -41,6 +41,9 @@ def process_url(item: URLItem):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
+##### CHANNEL ENDPOINTS #####
+
+
 @app.get("/api/channels")
 def list_channels():
     """
@@ -57,6 +60,7 @@ def list_channels():
         # Catch any other unexpected errors.
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
     
+
 @app.get("/api/channels/{channel_id}")
 def get_channel(channel_id: str):
     """
@@ -94,6 +98,98 @@ def get_channel_videos(channel_id: str):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
+##### VIDEO ENDPOINTS #####
+
+
+@app.get("/api/videos/{video_id}")
+def get_video(video_id: str):
+    """
+    Retrieves detailed information for a specific video.
+
+    - **video_id**: The unique ID of the video to retrieve.
+    """
+    try:
+        video = client.video_manager.get_video(video_id)
+        if video is None:
+            raise HTTPException(status_code=404, detail=f"Video with id '{video_id}' not found.")
+        return video
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+    
+    
+##### PLAYLIST ENDPOINTS #####
+
+
+@app.get("/api/playlists")
+def list_playlists():
+    """
+    Retrieves a list of all playlists stored in the database.
+    """
+    try:
+        return client.playlist_manager.list_playlists()
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.get("/api/playlists/{playlist_id}")
+def get_playlist(playlist_id: str):
+    """
+    Retrieves detailed information for a specific playlist.
+
+    - **playlist_id**: The unique ID of the playlist to retrieve.
+    """
+    try:
+        playlist = client.playlist_manager.get_playlist(playlist_id)
+        if playlist is None:
+            raise HTTPException(status_code=404, detail=f"Playlist with id '{playlist_id}' not found.")
+        return playlist
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.get("/api/playlists/{playlist_id}/videos")
+def get_playlist_videos(playlist_id: str, limit: int = None, sort_by: str = "position"):
+    """
+    Retrieves a list of videos for a specific playlist.
+
+    - **playlist_id**: The unique ID of the playlist.
+    - **limit**: The maximum number of videos to return.
+    - **sort_by**: The sorting criteria ('position', 'published_at', 'title').
+    """
+    try:
+        return client.playlist_manager.get_playlist_videos(playlist_id, limit=limit, sort_by=sort_by)
+    except ValueError as e:
+        # Catches the "not found" error from the backend.
+        raise HTTPException(status_code=404, detail=str(e))
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.delete("/api/playlists/{playlist_id}", status_code=200)
+def delete_playlist(playlist_id: str):
+    """
+    Deletes a specific playlist from the database.
+
+    - **playlist_id**: The unique ID of the playlist to delete.
+    """
+    try:
+        client.playlist_manager.delete_playlist(playlist_id)
+        return {"message": f"Playlist with id '{playlist_id}' deleted successfully."}
+    except ValueError as e:
+        # Catches the "not found" error from the backend.
+        raise HTTPException(status_code=404, detail=str(e))
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
 # Root endpoint for basic connectivity check
