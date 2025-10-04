@@ -189,18 +189,15 @@ class ChannelManager:
         :return: A list of dictionaries, each containing playlist 'id' and 'title'.
         """
         if not channel_id:
-            print("ERROR: channel_id cannot be empty.")
-            return []
+            # Raising ValueError here to be caught by the API layer for a 422 or 400 response.
+            raise ValueError("Channel ID cannot be empty.")
         
-        try:
-            return self.storage.list_playlists(
-                channel_id=channel_id,
-                limit=limit,
-                sort_by=sort_by
-            )
-        except Exception as e:
-            print(f"Error getting playlists for channel {channel_id}: {str(e)}")
-            return []
+        # Let exceptions from the storage layer (e.g., ValueError for not found, sqlite3.Error) propagate.
+        return self.storage.list_playlists(
+            channel_id=channel_id,
+            limit=limit,
+            sort_by=sort_by
+        )
     
     def get_online_video_list(self, channel_id: str) -> list:
         """
@@ -237,18 +234,13 @@ class ChannelManager:
         :return: A list of dictionaries, each with 'tag_name' and 'video_count'.
         """
         if not channel_id:
-            print("ERROR: channel_id cannot be empty.")
-            return []
+            raise ValueError("Channel ID cannot be empty.")
             
-        try:
-            return self.storage.get_tags_channel(
-                channel_id, 
-                limit=limit, 
-                min_video_count=min_video_count
-            )
-        except Exception as e:
-            print(f"Error getting tags for channel {channel_id}: {str(e)}")
-            return []
+        return self.storage.get_tags_channel(
+            channel_id, 
+            limit=limit, 
+            min_video_count=min_video_count
+        )
 
     def get_video_download_states(self, channel_id: str) -> dict:
         """
@@ -289,30 +281,20 @@ class ChannelManager:
     
     # TODO: Add method to search videos by title, description, tags, etc.
     
-    def delete_channel(self, channel_id: str) -> bool:
+    def delete_channel(self, channel_id: str):
         """
-        Deletes a channel and all its associated data (videos, playlists, tags, timestamps)
-        from the database.
+        Deletes a channel and all its associated data from the database.
 
         :param channel_id: The ID of the channel to delete.
-        :return: True if deletion was successful, False otherwise.
+        :raises ValueError: If the channel_id is empty or the channel is not found.
+        :raises sqlite3.Error: For underlying database errors.
         """
         if not channel_id:
-            print("ERROR: channel_id cannot be empty for deletion.")
-            return False
-        
-        if not self.storage._channel_exists(channel_id):
-            print(f"Channel {channel_id} not found in database. Nothing to delete.")
-            return False
-            
-        try:
-            # The cascade option in SQLiteStorage.delete_channel handles associated videos.
-            # The schema's ON DELETE CASCADE handles playlists, video_tags, and timestamps.
-            self.storage.delete_channel(channel_id, cascade=True)
-            print(f"Successfully deleted channel {channel_id} and all its associated data.")
-            return True
-        except Exception as e:
-            print(f"Error deleting channel {channel_id}: {str(e)}")
-            return False
+            raise ValueError("Channel ID cannot be empty for deletion.")
+
+        # The storage layer's delete_channel will raise a ValueError if not found.
+        # We let it propagate up to be handled by the API layer.
+        self.storage.delete_channel(channel_id)
+        print(f"Successfully deleted channel {channel_id} and all its associated data.")
 
     

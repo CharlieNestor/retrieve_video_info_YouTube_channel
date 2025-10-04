@@ -705,8 +705,7 @@ class SQLiteStorage:
         """
         # First check if the channel exists
         if not self._channel_exists(channel_id):
-            print(f"WARNING: Channel with ID {channel_id} does not exist. Cannot retrieve tags.")
-            return []
+            raise ValueError(f"Channel with ID '{channel_id}' does not exist.")
 
         cursor = self.conn.cursor()
         query = """
@@ -725,14 +724,10 @@ class SQLiteStorage:
             query += " LIMIT ?"
             params.append(limit)
         
-        try:
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            # Convert sqlite3.Row objects to dictionaries
-            return [dict(row) for row in rows] if rows else []
-        except sqlite3.Error as e:
-            print(f"Database error getting tags for channel {channel_id}: {e}")
-            return []
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        # Convert sqlite3.Row objects to dictionaries
+        return [dict(row) for row in rows] if rows else []
         
     
     ###### TIMESTAMPS OPERATIONS #####
@@ -1009,8 +1004,7 @@ class SQLiteStorage:
         """
         # Validate channel_id if provided
         if channel_id and not self._channel_exists(channel_id):
-            print(f"WARNING: Channel with ID {channel_id} does not exist. Cannot list playlists for this channel.")
-            return []
+            raise ValueError(f"Channel with ID '{channel_id}' does not exist.")
         
         cursor = self.conn.cursor()
         

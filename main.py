@@ -98,6 +98,64 @@ def get_channel_videos(channel_id: str):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
+@app.delete("/api/channels/{channel_id}", status_code=200)
+def delete_channel(channel_id: str):
+    """
+    Deletes a channel and all of its associated data.
+
+    - **channel_id**: The ID of the channel to delete.
+    """
+    try:
+        client.channel_manager.delete_channel(channel_id)
+        return {"message": f"Channel '{channel_id}' and all associated data deleted successfully."}
+    except ValueError as e:
+        # This catches the "not found" or "empty id" error from the manager.
+        raise HTTPException(status_code=404, detail=str(e))
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.get("/api/channels/{channel_id}/playlists")
+def get_channel_playlists(channel_id: str, limit: int = None, sort_by: str = "title"):
+    """
+    Retrieves a list of playlists for a specific channel.
+
+    - **channel_id**: The unique ID of the channel.
+    - **limit**: The maximum number of playlists to return.
+    - **sort_by**: The sorting criteria ('title', 'video_count').
+    """
+    try:
+        return client.channel_manager.get_channel_playlists(channel_id, limit=limit, sort_by=sort_by)
+    except ValueError as e:
+        # Catches errors like non-existent channel or empty channel_id.
+        raise HTTPException(status_code=404, detail=str(e))
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.get("/api/channels/{channel_id}/tags")
+def get_channel_tags(channel_id: str, limit: int = None, min_video_count: int = 1):
+    """
+    Retrieves unique tags for a channel from the local database.
+
+    - **channel_id**: The ID of the channel.
+    - **limit**: The maximum number of unique tags to return.
+    - **min_video_count**: The minimum number of videos a tag must be associated with.
+    """
+    try:
+        return client.channel_manager.get_channel_tags(channel_id, limit=limit, min_video_count=min_video_count)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
 ##### VIDEO ENDPOINTS #####
 
 
