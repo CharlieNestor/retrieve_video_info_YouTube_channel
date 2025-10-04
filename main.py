@@ -1,6 +1,7 @@
 import sqlite3
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from youtube_client import YouTubeClient
 
 
@@ -14,6 +15,19 @@ app = FastAPI(
     title="YouTube Channel Retriever API",
     description="An API to interact with the YouTube channel data library.",
     version="1.0.0"
+)
+
+# Set up CORS (Cross-Origin Resource Sharing)
+origins = [
+    "http://localhost:5173",  # Allow the frontend development server
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Instantiate the YouTubeClient

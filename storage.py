@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import threading
 from typing import List, Dict, Union, Any
 
 class SQLiteStorage:
@@ -17,6 +18,7 @@ class SQLiteStorage:
         """
         self.db_path = db_path
         self.conn = None    # TODO: Implement better connection management
+        self.lock = threading.Lock()
         self._connect()
         self._create_schema()
 
@@ -183,56 +185,62 @@ class SQLiteStorage:
 
         :param channel_data: Dict containing channel information
         """
-        cursor = self.conn.cursor()
-        
-        # Extract only the profile picture URL from the thumbnail dictionary
-        thumbnail_url = None
-        if isinstance(channel_data.get('thumbnail_url'), dict):
-            thumbnail_url = channel_data.get('thumbnail_url', {}).get('profile_picture')
-        else:
-            thumbnail_url = channel_data.get('thumbnail_url')
-            
-        # Use the total video count directly
-        video_count = channel_data.get('video_count')
-        
-        # Convert content_breakdown to JSON string if it's a dictionary
-        content_breakdown = channel_data.get('content_breakdown')
-        if isinstance(content_breakdown, dict):
-            content_breakdown = json.dumps(content_breakdown)
-        
-        # SQL for inserting a new channel or updating an existing one.
-        # created_at is set to CURRENT_TIMESTAMP on initial insert.
-        # last_updated is set to CURRENT_TIMESTAMP on both insert and update.
-        # On conflict (update), created_at is NOT modified.
-        sql = """
-            -- insertion
-            INSERT INTO channels (
-                id, name, description, subscriber_count, video_count, 
-                thumbnail_url, content_breakdown, 
-                created_at, 
-                last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            -- update
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                description = excluded.description,
-                subscriber_count = excluded.subscriber_count,
-                video_count = excluded.video_count,
-                thumbnail_url = excluded.thumbnail_url,
-                content_breakdown = excluded.content_breakdown,
-                last_updated = CURRENT_TIMESTAMP
-        """
-        params = (
-            channel_data['id'],
-            channel_data['name'],
-            channel_data.get('description'),
-            channel_data.get('subscriber_count'),
-            video_count,
-            thumbnail_url,
-            content_breakdown
-        )
-        cursor.execute(sql, params)
-        self.conn.commit()
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                
+                # Extract only the profile picture URL from the thumbnail dictionary
+                thumbnail_url = None
+                if isinstance(channel_data.get('thumbnail_url'), dict):
+                    thumbnail_url = channel_data.get('thumbnail_url', {}).get('profile_picture')
+                else:
+                    thumbnail_url = channel_data.get('thumbnail_url')
+                    
+                # Use the total video count directly
+                video_count = channel_data.get('video_count')
+                
+                # Convert content_breakdown to JSON string if it's a dictionary
+                content_breakdown = channel_data.get('content_breakdown')
+                if isinstance(content_breakdown, dict):
+                    content_breakdown = json.dumps(content_breakdown)
+                
+                # SQL for inserting a new channel or updating an existing one.
+                # created_at is set to CURRENT_TIMESTAMP on initial insert.
+                # last_updated is set to CURRENT_TIMESTAMP on both insert and update.
+                # On conflict (update), created_at is NOT modified.
+                sql = """
+                    -- insertion
+                    INSERT INTO channels (
+                        id, name, description, subscriber_count, video_count, 
+                        thumbnail_url, content_breakdown, 
+                        created_at, 
+                        last_updated
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    -- update
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        description = excluded.description,
+                        subscriber_count = excluded.subscriber_count,
+                        video_count = excluded.video_count,
+                        thumbnail_url = excluded.thumbnail_url,
+                        content_breakdown = excluded.content_breakdown,
+                        last_updated = CURRENT_TIMESTAMP
+                """
+                params = (
+                    channel_data['id'],
+                    channel_data['name'],
+                    channel_data.get('description'),
+                    channel_data.get('subscriber_count'),
+                    video_count,
+                    thumbnail_url,
+                    content_breakdown
+                )
+                cursor.execute(sql, params)
+                self.conn.commit()
+            except Exception as e:
+                print(f"Database error in save_channel: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
 
     def get_channel(self, channel_id: str) -> Union[Dict, None]:
         """
@@ -241,10 +249,11 @@ class SQLiteStorage:
         :param channel_id: The unique identifier of the channel
         :return: Dictionary containing channel information or None if not found
         """
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM channels WHERE id = ?", (channel_id,))
-        row = cursor.fetchone()
-        return dict(row) if row else None # Convert Row to dict if found
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM channels WHERE id = ?", (channel_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None # Convert Row to dict if found
     
     def _channel_exists(self, channel_id: str) -> bool:
         """
@@ -253,9 +262,10 @@ class SQLiteStorage:
         :param channel_id: The unique identifier of the channel
         :return: True if the the query ID actually exist, False otherwise
         """
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT 1 FROM channels WHERE id = ?", (channel_id,))
-        return cursor.fetchone() is not None
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT 1 FROM channels WHERE id = ?", (channel_id,))
+            return cursor.fetchone() is not None
     
     def list_channels(self, limit: int = None, sort_by: str = "name") -> List[Dict]:
         """
@@ -265,20 +275,21 @@ class SQLiteStorage:
         :param sort_by: The sorting criteria for the channel shown. Valid values 'id', 'name'
         :return: List of dictionaries containing channel id and name
         """
-        cursor = self.conn.cursor()
-        query = "SELECT id, name FROM channels"
-        if sort_by:
-            if sort_by in ['id', 'name']:
-                query += f" ORDER BY {sort_by}"
-            else:
-                print(f"WARNING: Invalid sort_by column: {sort_by}. Defaulting to name.")
-                query += " ORDER BY name"
-        if limit:
-            query += f" LIMIT {limit}"
+        with self.lock:
+            cursor = self.conn.cursor()
+            query = "SELECT id, name FROM channels"
+            if sort_by:
+                if sort_by in ['id', 'name']:
+                    query += f" ORDER BY {sort_by}"
+                else:
+                    print(f"WARNING: Invalid sort_by column: {sort_by}. Defaulting to name.")
+                    query += " ORDER BY name"
+            if limit:
+                query += f" LIMIT {limit}"
 
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows] if rows else []
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
         
     def delete_channel(self, channel_id: str):
         """
@@ -287,12 +298,18 @@ class SQLiteStorage:
 
         :param channel_id: The unique identifier of the channel to be deleted
         """
-        # Check if the channel exists first
-        if not self._channel_exists(channel_id):
-            raise ValueError(f"WARNING: Channel ID {channel_id} does not exist in the database.")
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
-        self.conn.commit()
+        with self.lock:
+            try:
+                # Check if the channel exists first
+                if not self._channel_exists(channel_id):
+                    raise ValueError(f"WARNING: Channel ID {channel_id} does not exist in the database.")
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+                self.conn.commit()
+            except Exception as e:
+                print(f"Database error in delete_channel: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
 
     
     ###### VIDEO OPERATIONS #####
@@ -305,66 +322,72 @@ class SQLiteStorage:
 
         :param video_data: Dict containing video information
         """
-        cursor = self.conn.cursor()
-        
-        # Extract thumbnail URL if it's a complex object
-        thumbnail_url = video_data.get('thumbnail_url')
-        if isinstance(thumbnail_url, dict) and 'url' in thumbnail_url:
-            thumbnail_url = thumbnail_url['url']
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                
+                # Extract thumbnail URL if it's a complex object
+                thumbnail_url = video_data.get('thumbnail_url')
+                if isinstance(thumbnail_url, dict) and 'url' in thumbnail_url:
+                    thumbnail_url = thumbnail_url['url']
 
-        # SQL for inserting a new video or updating an existing one.
-        # Fields like file_path, downloaded, etc., are given default values for the INSERT part.
-        # On conflict (update), these specific fields are NOT updated, preserving their existing values.
-        sql = """
-            INSERT INTO videos (
-                id, title, description, channel_id, channel_title, 
-                published_at, duration, view_count, like_count,
-                thumbnail_url, is_short, is_live, status, 
-                file_path, transcript_path, downloaded, download_date,
-                last_updated
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,    -- 13 fields from video_data
-                ?, ?, ?, ?,                               -- 4 fields: file_path, transcript_path, downloaded, download_date
-                CURRENT_TIMESTAMP                         -- last_updated
-            )
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                description = excluded.description,
-                -- channel_id = excluded.channel_id, -- channel_id should not change for an existing video ID.
-                channel_title = excluded.channel_title,
-                published_at = excluded.published_at,
-                duration = excluded.duration,
-                view_count = excluded.view_count,
-                like_count = excluded.like_count,
-                thumbnail_url = excluded.thumbnail_url,
-                is_short = excluded.is_short,
-                is_live = excluded.is_live,
-                status = excluded.status,
-                last_updated = CURRENT_TIMESTAMP
-            -- Columns NOT updated by this general save_video if the video already exists:
-            -- file_path, transcript_path, downloaded, download_date.
-        """
-        params = (
-            video_data['id'],
-            video_data['title'],
-            video_data.get('description'),
-            video_data['channel_id'],
-            video_data.get('channel_title'),
-            video_data.get('published_at'),
-            video_data.get('duration'),
-            video_data.get('view_count'),
-            video_data.get('like_count'),
-            thumbnail_url,
-            video_data.get('is_short', False),
-            video_data.get('is_live', False),
-            video_data.get('status', 'available'),
-            video_data.get('file_path'),
-            video_data.get('transcript_path'),
-            video_data.get('downloaded', 0),
-            video_data.get('download_date') 
-        )
-        cursor.execute(sql, params)
-        self.conn.commit()
+                # SQL for inserting a new video or updating an existing one.
+                # Fields like file_path, downloaded, etc., are given default values for the INSERT part.
+                # On conflict (update), these specific fields are NOT updated, preserving their existing values.
+                sql = """
+                    INSERT INTO videos (
+                        id, title, description, channel_id, channel_title, 
+                        published_at, duration, view_count, like_count,
+                        thumbnail_url, is_short, is_live, status, 
+                        file_path, transcript_path, downloaded, download_date,
+                        last_updated
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,    -- 13 fields from video_data
+                        ?, ?, ?, ?,                               -- 4 fields: file_path, transcript_path, downloaded, download_date
+                        CURRENT_TIMESTAMP                         -- last_updated
+                    )
+                    ON CONFLICT(id) DO UPDATE SET
+                        title = excluded.title,
+                        description = excluded.description,
+                        -- channel_id = excluded.channel_id, -- channel_id should not change for an existing video ID.
+                        channel_title = excluded.channel_title,
+                        published_at = excluded.published_at,
+                        duration = excluded.duration,
+                        view_count = excluded.view_count,
+                        like_count = excluded.like_count,
+                        thumbnail_url = excluded.thumbnail_url,
+                        is_short = excluded.is_short,
+                        is_live = excluded.is_live,
+                        status = excluded.status,
+                        last_updated = CURRENT_TIMESTAMP
+                    -- Columns NOT updated by this general save_video if the video already exists:
+                    -- file_path, transcript_path, downloaded, download_date.
+                """
+                params = (
+                    video_data['id'],
+                    video_data['title'],
+                    video_data.get('description'),
+                    video_data['channel_id'],
+                    video_data.get('channel_title'),
+                    video_data.get('published_at'),
+                    video_data.get('duration'),
+                    video_data.get('view_count'),
+                    video_data.get('like_count'),
+                    thumbnail_url,
+                    video_data.get('is_short', False),
+                    video_data.get('is_live', False),
+                    video_data.get('status', 'available'),
+                    video_data.get('file_path'),
+                    video_data.get('transcript_path'),
+                    video_data.get('downloaded', 0),
+                    video_data.get('download_date') 
+                )
+                cursor.execute(sql, params)
+                self.conn.commit()
+            except Exception as e:
+                print(f"Database error in save_video: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
         
     def get_video(self, video_id: str) -> Union[Dict, None]:
         """
@@ -373,10 +396,11 @@ class SQLiteStorage:
         :param video_id: The unique identifier of the video
         :return: Dictionary containing video information or None if not found
         """
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
-        row = cursor.fetchone()
-        return dict(row) if row else None # Convert Row to dict if found
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None # Convert Row to dict if found
     
     def _video_exists(self, video_id: str) -> bool:
         """
@@ -385,9 +409,10 @@ class SQLiteStorage:
         :param video_id: The unique identifier of the video
         :return: True if the video exists, False otherwise
         """
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,))
-        return cursor.fetchone() is not None
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,))
+            return cursor.fetchone() is not None
     
     def list_channel_videos(self, channel_id: str, limit: int = None, sort_by: str= "published_at") -> List[Dict]:
         """
@@ -398,36 +423,37 @@ class SQLiteStorage:
         :param sort_by: The sorting criteria for the videos shown. Valid values 'title', 'published_at'
         :return: List of dictionaries containing video id and title
         """
-        if not self._channel_exists(channel_id):
-            print(f"WARNING: Channel with ID {channel_id} does not exist.")
-            return []
-        
-        # Validate sort_by parameter
-        if sort_by not in ['title', 'published_at']:
-            print(f"WARNING: Invalid sort_by column: {sort_by}. Defaulting to published_at.")
-            sort_by = 'published_at'
-        
-        cursor = self.conn.cursor()
+        with self.lock:
+            if not self._channel_exists(channel_id):
+                print(f"WARNING: Channel with ID {channel_id} does not exist.")
+                return []
+            
+            # Validate sort_by parameter
+            if sort_by not in ['title', 'published_at']:
+                print(f"WARNING: Invalid sort_by column: {sort_by}. Defaulting to published_at.")
+                sort_by = 'published_at'
+            
+            cursor = self.conn.cursor()
 
-        # Build the query with optional limit and sorting
-        query = "SELECT id, title FROM videos WHERE channel_id = ?"
+            # Build the query with optional limit and sorting
+            query = "SELECT id, title FROM videos WHERE channel_id = ?"
 
-        # Apply sorting based on the validated sort_by parameter
-        if sort_by == 'published_at':
-            query += " ORDER BY published_at DESC"  # Most recent videos first
-        else:  # sort_by == 'title'
-            query += " ORDER BY title ASC"  # Alphabetical order
-        
-        # Apply limit if provided
-        if limit:
-            query += f" LIMIT {limit}"
-        try:
-            cursor.execute(query, (channel_id,))
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
-        except Exception as e:
-            print(f"Error getting channel videos: {e}")
-            return []
+            # Apply sorting based on the validated sort_by parameter
+            if sort_by == 'published_at':
+                query += " ORDER BY published_at DESC"  # Most recent videos first
+            else:  # sort_by == 'title'
+                query += " ORDER BY title ASC"  # Alphabetical order
+            
+            # Apply limit if provided
+            if limit:
+                query += f" LIMIT {limit}"
+            try:
+                cursor.execute(query, (channel_id,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows] if rows else []
+            except Exception as e:
+                print(f"Error getting channel videos: {e}")
+                return []
 
     def get_videos_with_download_status(self, channel_id: str) -> List[Dict]:
         """
@@ -439,20 +465,21 @@ class SQLiteStorage:
         :param channel_id: The YouTube channel ID.
         :return: A list of dictionaries, each containing 'id', 'title', and 'downloaded'.
         """
-        if not self._channel_exists(channel_id):
-            print(f"WARNING: Channel with ID {channel_id} does not exist.")
-            return []
+        with self.lock:
+            if not self._channel_exists(channel_id):
+                print(f"WARNING: Channel with ID {channel_id} does not exist.")
+                return []
 
-        cursor = self.conn.cursor()
-        query = "SELECT id, title, downloaded FROM videos WHERE channel_id = ? ORDER BY published_at DESC"
-        
-        try:
-            cursor.execute(query, (channel_id,))
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
-        except Exception as e:
-            print(f"Error getting videos with download status: {e}")
-            return []
+            cursor = self.conn.cursor()
+            query = "SELECT id, title, downloaded FROM videos WHERE channel_id = ? ORDER BY published_at DESC"
+            
+            try:
+                cursor.execute(query, (channel_id,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows] if rows else []
+            except Exception as e:
+                print(f"Error getting videos with download status: {e}")
+                return []
         
     def _update_video_status(self, video_id: str, status: str) -> bool:
         """
@@ -463,24 +490,25 @@ class SQLiteStorage:
         :param video_id: The unique identifier of the video
         :param status: The new status to set for the video (e.g., 'available', 'unavailable')
         """
-        cursor = self.conn.cursor()
-        try:
-            cursor.execute("""
-                UPDATE videos SET
-                    status = ?
-                WHERE id = ?
-            """, (status, video_id))
-            self.conn.commit()
-            if cursor.rowcount > 0:
-                print(f"Successfully updated status for video {video_id} to {status}")
-                return True
-            else:
-                return False
-            
-        except Exception as e:
-            print(f"Error updating status for video {video_id} in DB: {e}") # Keep error print for debugging
-            self.conn.rollback()
-            return False
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    UPDATE videos SET
+                        status = ?
+                    WHERE id = ?
+                """, (status, video_id))
+                self.conn.commit()
+                if cursor.rowcount > 0:
+                    print(f"Successfully updated status for video {video_id} to {status}")
+                    return True
+                else:
+                    # This case means the video_id did not exist, so no rows were updated.
+                    return False
+            except Exception as e:
+                print(f"Database error in _update_video_status: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
         
     def _update_video_download_status(self, video_id: str, file_path: str) -> bool:
         """
@@ -493,36 +521,37 @@ class SQLiteStorage:
         :param file_path: Absolute path to the downloaded video file.
         :return: True if update was successful, False otherwise.
         """
-        # Check if the video exists first
-        if not self._video_exists(video_id):
-            print(f"WARNING: Video ID {video_id} does not exist in the database.")
-            return False
-        # Validate file_path
-        if not file_path:
-            print(f"WARNING: file_path cannot be empty when updating download status for video {video_id}.")
-            return False
-        
-        # Update the video record with the file path and set downloaded to 1
-        # Also set download_date to CURRENT_TIMESTAMP
-        cursor = self.conn.cursor()
-        try:
-            cursor.execute("""
-                UPDATE videos SET
-                    file_path = ?,
-                    downloaded = 1,
-                    download_date = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (file_path, video_id))
-            self.conn.commit()
-            if cursor.rowcount > 0:
-                print(f"Successfully updated download status for video {video_id}")
-                return True
-            else:
-                return False
-        except Exception as e:
-            print(f"Error updating download status for video {video_id} in DB: {e}") # Keep error print
-            self.conn.rollback()
-            return False
+        with self.lock:
+            try:
+                # Check if the video exists first
+                if not self._video_exists(video_id):
+                    print(f"WARNING: Video ID {video_id} does not exist in the database.")
+                    return False
+                # Validate file_path
+                if not file_path:
+                    print(f"WARNING: file_path cannot be empty when updating download status for video {video_id}.")
+                    return False
+                
+                # Update the video record with the file path and set downloaded to 1
+                # Also set download_date to CURRENT_TIMESTAMP
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    UPDATE videos SET
+                        file_path = ?,
+                        downloaded = 1,
+                        download_date = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (file_path, video_id))
+                self.conn.commit()
+                if cursor.rowcount > 0:
+                    print(f"Successfully updated download status for video {video_id}")
+                    return True
+                else:
+                    return False
+            except Exception as e:
+                print(f"Database error in _update_video_download_status: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
         
         
     def delete_video(self, video_id: str):
@@ -531,13 +560,19 @@ class SQLiteStorage:
 
         :param video_id: The unique identifier of the video to be deleted
         """
-        # Check if the video exists first
-        if not self._video_exists(video_id):
-            raise ValueError("WARNING: Video ID {video_id} does not exist in the database.")
-        
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
-        self.conn.commit()
+        with self.lock:
+            try:
+                # Check if the video exists first
+                if not self._video_exists(video_id):
+                    raise ValueError("WARNING: Video ID {video_id} does not exist in the database.")
+                
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+                self.conn.commit()
+            except Exception as e:
+                print(f"Database error in delete_video: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
 
 
     ###### TAGS OPERATIONS #####
@@ -554,69 +589,66 @@ class SQLiteStorage:
         :param video_id: The ID of the video.
         :param tags: A list of tag names (strings) for the video.
         """
-        if not video_id:
-            print("ERROR: video_id cannot be empty when saving tags.")
-            return False # Indicate failure
+        with self.lock:
+            try:
+                if not video_id:
+                    print("ERROR: video_id cannot be empty when saving tags.")
+                    return False # Indicate failure
 
-        cursor = self.conn.cursor()
+                cursor = self.conn.cursor()
 
-        try:
-            # 1. Check if the video actually exists
-            cursor.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,))
-            if not cursor.fetchone():
-                print(f"WARNING: Video with ID {video_id} not found. Cannot save tags.")
-                return False # Indicate failure
+                # 1. Check if the video actually exists
+                cursor.execute("SELECT 1 FROM videos WHERE id = ?", (video_id,))
+                if not cursor.fetchone():
+                    print(f"WARNING: Video with ID {video_id} not found. Cannot save tags.")
+                    return False # Indicate failure
 
-            # 2. Delete existing tag associations for this video
-            cursor.execute("DELETE FROM video_tags WHERE video_id = ?", (video_id,))
+                # 2. Delete existing tag associations for this video
+                cursor.execute("DELETE FROM video_tags WHERE video_id = ?", (video_id,))
 
-            # 3. Process and link new tags (only if tags list is provided and not empty)
-            if tags: # Proceed only if there are tags to add
-                processed_count = 0
-                for tag_name in tags:
-                    if not tag_name or not isinstance(tag_name, str):
-                        continue
+                # 3. Process and link new tags (only if tags list is provided and not empty)
+                if tags: # Proceed only if there are tags to add
+                    processed_count = 0
+                    for tag_name in tags:
+                        if not tag_name or not isinstance(tag_name, str):
+                            continue
 
-                    normalized_tag = tag_name.lower().strip()
-                    if not normalized_tag:
-                        continue
+                        normalized_tag = tag_name.lower().strip()
+                        if not normalized_tag:
+                            continue
 
-                    # Insert tag into 'tags' table if it doesn't exist
-                    cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (normalized_tag,))
+                        # Insert tag into 'tags' table if it doesn't exist
+                        cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (normalized_tag,))
 
-                    # Get the ID of the tag
-                    cursor.execute("SELECT id FROM tags WHERE name = ?", (normalized_tag,))
-                    tag_row = cursor.fetchone()
+                        # Get the ID of the tag
+                        cursor.execute("SELECT id FROM tags WHERE name = ?", (normalized_tag,))
+                        tag_row = cursor.fetchone()
 
-                    if tag_row:
-                        tag_id = tag_row['id']
-                        # Link video and tag in 'video_tags' table
-                        cursor.execute("INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?, ?)", (video_id, tag_id))
-                        processed_count += 1
-                    else:
-                        print(f"WARNING: Could not retrieve ID for tag '{normalized_tag}' for video {video_id}.")
-                
-                if processed_count > 0:
-                    print(f"Successfully saved {processed_count} tags for video {video_id}.")
-                else: 
-                    print(f"WARNING: No valid tags were processed for video {video_id} from the provided list.")
-            else:
-                # No new tags were provided as input.
-                print(f"WARNING: No new tags provided for video {video_id}.")
+                        if tag_row:
+                            tag_id = tag_row['id']
+                            # Link video and tag in 'video_tags' table
+                            cursor.execute("INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?, ?)", (video_id, tag_id))
+                            processed_count += 1
+                        else:
+                            print(f"WARNING: Could not retrieve ID for tag '{normalized_tag}' for video {video_id}.")
+                    
+                    if processed_count > 0:
+                        print(f"Successfully saved {processed_count} tags for video {video_id}.")
+                    else: 
+                        print(f"WARNING: No valid tags were processed for video {video_id} from the provided list.")
+                else:
+                    # No new tags were provided as input.
+                    print(f"WARNING: No new tags provided for video {video_id}.")
 
 
-            # 4. Commit the transaction
-            self.conn.commit()
-            return True # Indicate success
+                # 4. Commit the transaction
+                self.conn.commit()
+                return True # Indicate success
 
-        except sqlite3.Error as e:
-            print(f"Database error saving tags for video {video_id}: {e}")
-            self.conn.rollback() # Rollback changes on error
-            return False # Indicate failure
-        except Exception as e:
-            print(f"An unexpected error occurred saving tags for video {video_id}: {e}")
-            self.conn.rollback()
-            return False # Indicate failure
+            except Exception as e:
+                print(f"Database error in save_video_tags: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
         
     
     def list_tags(self, limit: int = None, sort_by: str = "name") -> List[Dict[str, Any]]:
@@ -627,40 +659,41 @@ class SQLiteStorage:
         :param sort_by: The column to sort by. Valid values are 'name' or 'frequency'.
         :return: A list of dictionaries, each containing 'name' and 'frequency' of the tag.
         """
-        cursor = self.conn.cursor()
-        # Basic validation for sort_by to prevent SQL injection if it were user-facing without sanitization
-        allowed_sort_columns = ["name"]     # can be extended with more columns if needed
-        if sort_by not in allowed_sort_columns:
-            sort_by = "name" # Default to a safe column
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                # Basic validation for sort_by to prevent SQL injection if it were user-facing without sanitization
+                allowed_sort_columns = ["name"]     # can be extended with more columns if needed
+                if sort_by not in allowed_sort_columns:
+                    sort_by = "name" # Default to a safe column
 
-        # Join with video_tags to count occurrences
-        query = """
-            SELECT t.name, COUNT(vt.video_id) AS frequency
-            FROM tags t
-            LEFT JOIN video_tags vt ON t.id = vt.tag_id
-            GROUP BY t.name
-            ORDER BY 
-        """
+                # Join with video_tags to count occurrences
+                query = """
+                    SELECT t.name, COUNT(vt.video_id) AS frequency
+                    FROM tags t
+                    LEFT JOIN video_tags vt ON t.id = vt.tag_id
+                    GROUP BY t.name
+                    ORDER BY 
+                """
 
-        # Add the appropriate ORDER BY clause based on sort_by
-        if sort_by == "frequency":
-            query += "frequency DESC, t.name ASC"
-        else:  # sort_by == "name"
-            query += "t.name ASC"
+                # Add the appropriate ORDER BY clause based on sort_by
+                if sort_by == "frequency":
+                    query += "frequency DESC, t.name ASC"
+                else:  # sort_by == "name"
+                    query += "t.name ASC"
 
-        params = []
+                params = []
 
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        
-        try:
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
-        except sqlite3.Error as e:
-            print(f"Database error listing tags: {e}")
-            return []
+                if limit is not None:
+                    query += " LIMIT ?"
+                    params.append(limit)
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows] if rows else []
+            except sqlite3.Error as e:
+                print(f"Database error listing tags: {e}")
+                return []
         
     
     def get_tags_video(self, video_id: str) -> List[str]:
@@ -670,26 +703,27 @@ class SQLiteStorage:
         :param video_id: The ID of the video.
         :return: A list of tag names for the video, or an empty list if none are found.
         """
-        # First check if the video exists
-        if not self._video_exists(video_id):
-            print(f"WARNING: Video with ID {video_id} not found. Cannot retrieve tags.")
-            return []
-        
-        cursor = self.conn.cursor()
-        query = """
-            SELECT t.name
-            FROM tags t
-            JOIN video_tags vt ON t.id = vt.tag_id
-            WHERE vt.video_id = ?
-            ORDER BY t.name ASC;
-        """
-        try:
-            cursor.execute(query, (video_id,))
-            rows = cursor.fetchall()
-            return [row['name'] for row in rows] if rows else []
-        except sqlite3.Error as e:
-            print(f"Database error getting tags for video {video_id}: {e}")
-            return []
+        with self.lock:
+            # First check if the video exists
+            if not self._video_exists(video_id):
+                print(f"WARNING: Video with ID {video_id} not found. Cannot retrieve tags.")
+                return []
+            
+            cursor = self.conn.cursor()
+            query = """
+                SELECT t.name
+                FROM tags t
+                JOIN video_tags vt ON t.id = vt.tag_id
+                WHERE vt.video_id = ?
+                ORDER BY t.name ASC;
+            """
+            try:
+                cursor.execute(query, (video_id,))
+                rows = cursor.fetchall()
+                return [row['name'] for row in rows] if rows else []
+            except sqlite3.Error as e:
+                print(f"Database error getting tags for video {video_id}: {e}")
+                return []
         
     
     def get_tags_channel(self, channel_id: str, limit: int = None, min_video_count: int = 1) -> List[Dict[str, Any]]:
@@ -703,31 +737,32 @@ class SQLiteStorage:
         :return: A list of dictionaries, each containing 'tag_name' and 'video_count',
                 or an empty list if no relevant tags are found.
         """
-        # First check if the channel exists
-        if not self._channel_exists(channel_id):
-            raise ValueError(f"Channel with ID '{channel_id}' does not exist.")
+        with self.lock:
+            # First check if the channel exists
+            if not self._channel_exists(channel_id):
+                raise ValueError(f"Channel with ID '{channel_id}' does not exist.")
 
-        cursor = self.conn.cursor()
-        query = """
-            SELECT t.name AS tag_name, COUNT(DISTINCT v.id) AS video_count
-            FROM tags t
-            JOIN video_tags vt ON t.id = vt.tag_id
-            JOIN videos v ON vt.video_id = v.id
-            WHERE v.channel_id = ?
-            GROUP BY t.name
-            HAVING COUNT(DISTINCT v.id) >= ?
-            ORDER BY video_count DESC, t.name ASC
-        """
-        params = [channel_id, min_video_count]
+            cursor = self.conn.cursor()
+            query = """
+                SELECT t.name AS tag_name, COUNT(DISTINCT v.id) AS video_count
+                FROM tags t
+                JOIN video_tags vt ON t.id = vt.tag_id
+                JOIN videos v ON vt.video_id = v.id
+                WHERE v.channel_id = ?
+                GROUP BY t.name
+                HAVING COUNT(DISTINCT v.id) >= ?
+                ORDER BY video_count DESC, t.name ASC
+            """
+            params = [channel_id, min_video_count]
 
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        # Convert sqlite3.Row objects to dictionaries
-        return [dict(row) for row in rows] if rows else []
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            # Convert sqlite3.Row objects to dictionaries
+            return [dict(row) for row in rows] if rows else []
         
     
     ###### TIMESTAMPS OPERATIONS #####
@@ -745,58 +780,55 @@ class SQLiteStorage:
         :param timestamps: A list of dictionaries, each with 'start_time' (int) and 'title' (str).
         :return: True if saving was successful, False otherwise.
         """
-        # Check if the video exists first
-        if not self._video_exists(video_id):
-            print(f"WARNING: Video with ID {video_id} not found. Cannot save timestamps.")
-            return False
-    
-        cursor = self.conn.cursor()
-        
-        try:
-            # 1. Delete existing timestamps for this video
-            cursor.execute("DELETE FROM timestamps WHERE video_id = ?", (video_id,))
-
-            # Handle cases where timestamps might be None or empty
-            if not timestamps: # Checks for None or empty list
-                print(f"WARNING: No timestamps provided or found for video {video_id}. Existing timestamps (if any) cleared.")
-                self.conn.commit() # Commit the delete operation
-                return True
+        with self.lock:
+            try:
+                # Check if the video exists first
+                if not self._video_exists(video_id):
+                    print(f"WARNING: Video with ID {video_id} not found. Cannot save timestamps.")
+                    return False
             
-            data_to_insert = []
-            # 2. Prepare data for bulk insert
-            # Map the input dict keys to the table columns (time_seconds, description)
-            data_to_insert = [
-                (video_id, ts['start_time'], ts['title'])
-                for ts in timestamps
-                if 'start_time' in ts and 'title' in ts # Basic validation
-            ]
+                cursor = self.conn.cursor()
+                
+                # 1. Delete existing timestamps for this video
+                cursor.execute("DELETE FROM timestamps WHERE video_id = ?", (video_id,))
 
-            if not data_to_insert:
-                print(f"WARNING: No valid timestamp data found in the provided list for {video_id}.")
-                # Still commit the delete operation
+                # Handle cases where timestamps might be None or empty
+                if not timestamps: # Checks for None or empty list
+                    print(f"WARNING: No timestamps provided or found for video {video_id}. Existing timestamps (if any) cleared.")
+                    self.conn.commit() # Commit the delete operation
+                    return True
+                
+                data_to_insert = []
+                # 2. Prepare data for bulk insert
+                # Map the input dict keys to the table columns (time_seconds, description)
+                data_to_insert = [
+                    (video_id, ts['start_time'], ts['title'])
+                    for ts in timestamps
+                    if 'start_time' in ts and 'title' in ts # Basic validation
+                ]
+
+                if not data_to_insert:
+                    print(f"WARNING: No valid timestamp data found in the provided list for {video_id}.")
+                    # Still commit the delete operation
+                    self.conn.commit()
+                    return True
+
+                # 3. Bulk insert the new timestamps
+                cursor.executemany("""
+                    INSERT INTO timestamps (video_id, time_seconds, description)
+                    VALUES (?, ?, ?)
+                """, data_to_insert)
+                
+                # 4. Commit the transaction
                 self.conn.commit()
+                print(f"Successfully saved {len(data_to_insert)} timestamps for video {video_id}.")
+
                 return True
-
-            # 3. Bulk insert the new timestamps
-            cursor.executemany("""
-                INSERT INTO timestamps (video_id, time_seconds, description)
-                VALUES (?, ?, ?)
-            """, data_to_insert)
-            
-            # 4. Commit the transaction
-            self.conn.commit()
-            print(f"Successfully saved {len(data_to_insert)} timestamps for video {video_id}.")
-
-            return True
-            
-        except sqlite3.Error as e:
-            print(f"Database error saving timestamps for video {video_id}: {e}")
-            self.conn.rollback() # Rollback changes on error
-            return False
-        except Exception as e:
-            print(f"An unexpected error occurred saving timestamps for video {video_id}: {e}")
-            self.conn.rollback()
-            return False
+                
+            except Exception as e:
+                print(f"Database error in save_video_timestamps: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
         
     
     def get_video_timestamps(self, video_id: str) -> List[Dict[str, Any]]:
@@ -808,26 +840,27 @@ class SQLiteStorage:
                  (e.g., {'time_seconds': 0, 'description': 'Intro'}).
                  Returns an empty list if no timestamps are found or video doesn't exist.
         """
-        # First check if the video exists
-        if not self._video_exists(video_id):
-            print(f"WARNING: Video with ID {video_id} does not exist. Cannot retrieve timestamps.")
-            return []
-        
-        cursor = self.conn.cursor()
-        query = """
-            SELECT time_seconds, description
-            FROM timestamps
-            WHERE video_id = ?
-            ORDER BY time_seconds ASC;
-        """
-        try:
-            cursor.execute(query, (video_id,))
-            rows = cursor.fetchall()
-            # Convert sqlite3.Row objects to dictionaries
-            return [dict(row) for row in rows] if rows else []
-        except sqlite3.Error as e:
-            print(f"Database error getting timestamps for video {video_id}: {e}")
-            return []
+        with self.lock:
+            # First check if the video exists
+            if not self._video_exists(video_id):
+                print(f"WARNING: Video with ID {video_id} does not exist. Cannot retrieve timestamps.")
+                return []
+            
+            cursor = self.conn.cursor()
+            query = """
+                SELECT time_seconds, description
+                FROM timestamps
+                WHERE video_id = ?
+                ORDER BY time_seconds ASC;
+            """
+            try:
+                cursor.execute(query, (video_id,))
+                rows = cursor.fetchall()
+                # Convert sqlite3.Row objects to dictionaries
+                return [dict(row) for row in rows] if rows else []
+            except sqlite3.Error as e:
+                print(f"Database error getting timestamps for video {video_id}: {e}")
+                return []
         
 
     ##### PLAYLIST OPERATIONS #####
@@ -842,62 +875,63 @@ class SQLiteStorage:
         :param playlist_data: Dict containing playlist information
         :return: True if the playlist was saved successfully, False otherwise.
         """
-        cursor = self.conn.cursor()
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
 
-        # Ensure channel_id exists before saving playlist
-        channel_id = playlist_data.get('channel_id')
-        if not channel_id:
-            print("ERROR: Cannot save playlist without a channel_id")
-            return False
-        
-        # Check if the channel exists
-        if not self._channel_exists(channel_id):
-            print(f"WARNING: Channel ID {channel_id} does not exist. Cannot save playlist.")
-            return False
-        
-        try:
-            # 1. Save/update playlist metadata
-            cursor.execute("""
-                INSERT OR REPLACE INTO playlists (
-                    id, title, description, channel_id, 
-                    video_count, modified_date, last_updated
-                ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (
-                playlist_data['id'],
-                playlist_data['title'],
-                playlist_data.get('description'),
-                channel_id,
-                playlist_data.get('video_count', 0),
-                playlist_data.get('modified_date'),
-            ))
-            self.conn.commit()
-            
-            # 2. Update playlist-video associations if videos are provided
-            if 'videos' in playlist_data and playlist_data['videos']:
-                stats = self._associate_videos_with_playlist(
-                    playlist_data['id'],
-                    playlist_data['videos']
-                )
+                # Ensure channel_id exists before saving playlist
+                channel_id = playlist_data.get('channel_id')
+                if not channel_id:
+                    print("ERROR: Cannot save playlist without a channel_id")
+                    return False
                 
-                updates_summary = []
-                if stats['inserted'] > 0:
-                    updates_summary.append(f"{stats['inserted']} videos added")
-                if stats['updated'] > 0:
-                    updates_summary.append(f"{stats['updated']} positions updated")
-                if stats['removed'] > 0:
-                    updates_summary.append(f"{stats['removed']} videos removed")
+                # Check if the channel exists
+                if not self._channel_exists(channel_id):
+                    print(f"WARNING: Channel ID {channel_id} does not exist. Cannot save playlist.")
+                    return False
+                
+                # 1. Save/update playlist metadata
+                cursor.execute("""
+                    INSERT OR REPLACE INTO playlists (
+                        id, title, description, channel_id, 
+                        video_count, modified_date, last_updated
+                    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    playlist_data['id'],
+                    playlist_data['title'],
+                    playlist_data.get('description'),
+                    channel_id,
+                    playlist_data.get('video_count', 0),
+                    playlist_data.get('modified_date'),
+                ))
+                self.conn.commit()
+                
+                # 2. Update playlist-video associations if videos are provided
+                if 'videos' in playlist_data and playlist_data['videos']:
+                    stats = self._associate_videos_with_playlist(
+                        playlist_data['id'],
+                        playlist_data['videos']
+                    )
                     
-                if updates_summary:
-                    print(f"Playlist '{playlist_data['title']}' updated: {', '.join(updates_summary)}")
-                else:
-                    print(f"No changes needed for playlist '{playlist_data['title']}'")
+                    updates_summary = []
+                    if stats['inserted'] > 0:
+                        updates_summary.append(f"{stats['inserted']} videos added")
+                    if stats['updated'] > 0:
+                        updates_summary.append(f"{stats['updated']} positions updated")
+                    if stats['removed'] > 0:
+                        updates_summary.append(f"{stats['removed']} videos removed")
+                        
+                    if updates_summary:
+                        print(f"Playlist '{playlist_data['title']}' updated: {', '.join(updates_summary)}")
+                    else:
+                        print(f"No changes needed for playlist '{playlist_data['title']}'")
 
-            return True  # Indicate success
-        
-        except Exception as e:
-            print(f"Error saving playlist {playlist_data['id']}: {e}")
-            self.conn.rollback()
-            return False  # Indicate failure
+                return True  # Indicate success
+            
+            except Exception as e:
+                print(f"Database error in save_playlist: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
     
     def _associate_videos_with_playlist(self, playlist_id: str, videos: List[Dict[str, Any]]) -> Dict[str, int]:
         """
@@ -908,66 +942,67 @@ class SQLiteStorage:
         :param videos: List of video dictionaries containing at least 'id'
         :return: Dict with counts of operations performed: {'updated': X, 'inserted': Y, 'removed': Z}
         """
-        if not playlist_id or not videos:
-            return {'updated': 0, 'inserted': 0, 'removed': 0}
-            
-        cursor = self.conn.cursor()
-        try:
-            # Begin transaction for performance
-            cursor.execute("BEGIN TRANSACTION")
-            
-            # Get existing video associations for this playlist
-            cursor.execute("SELECT video_id, position FROM playlist_videos WHERE playlist_id = ?", (playlist_id,))
-            existing_videos = {row['video_id']: row['position'] for row in cursor.fetchall()}
-            
-            # Track new video IDs for insertion
-            new_video_ids = set()
-            stats = {'updated': 0, 'inserted': 0, 'removed': 0}
-            
-            # Process each video in the playlist
-            for position, video in enumerate(videos):
-                video_id = video.get('id')
-                if not video_id:
-                    continue
+        with self.lock:
+            if not playlist_id or not videos:
+                return {'updated': 0, 'inserted': 0, 'removed': 0}
+                
+            cursor = self.conn.cursor()
+            try:
+                # Begin transaction for performance
+                cursor.execute("BEGIN TRANSACTION")
+                
+                # Get existing video associations for this playlist
+                cursor.execute("SELECT video_id, position FROM playlist_videos WHERE playlist_id = ?", (playlist_id,))
+                existing_videos = {row['video_id']: row['position'] for row in cursor.fetchall()}
+                
+                # Track new video IDs for insertion
+                new_video_ids = set()
+                stats = {'updated': 0, 'inserted': 0, 'removed': 0}
+                
+                # Process each video in the playlist
+                for position, video in enumerate(videos):
+                    video_id = video.get('id')
+                    if not video_id:
+                        continue
+                        
+                    new_video_ids.add(video_id)
                     
-                new_video_ids.add(video_id)
-                
-                # Check if this video exists in the playlist
-                if video_id in existing_videos:
-                    # Only update if position has changed
-                    if existing_videos[video_id] != position:
+                    # Check if this video exists in the playlist
+                    if video_id in existing_videos:
+                        # Only update if position has changed
+                        if existing_videos[video_id] != position:
+                            cursor.execute("""
+                                UPDATE playlist_videos 
+                                SET position = ? 
+                                WHERE playlist_id = ? AND video_id = ?
+                            """, (position, playlist_id, video_id))
+                            stats['updated'] += 1
+                    else:
+                        # Insert new association
                         cursor.execute("""
-                            UPDATE playlist_videos 
-                            SET position = ? 
-                            WHERE playlist_id = ? AND video_id = ?
-                        """, (position, playlist_id, video_id))
-                        stats['updated'] += 1
-                else:
-                    # Insert new association
-                    cursor.execute("""
-                        INSERT INTO playlist_videos (playlist_id, video_id, position)
-                        VALUES (?, ?, ?)
-                    """, (playlist_id, video_id, position))
-                    stats['inserted'] += 1
-            
-            # Remove associations for videos no longer in the playlist
-            videos_to_remove = set(existing_videos.keys()) - new_video_ids
-            if videos_to_remove:
-                placeholders = ','.join(['?'] * len(videos_to_remove))
-                cursor.execute(f"""
-                    DELETE FROM playlist_videos 
-                    WHERE playlist_id = ? AND video_id IN ({placeholders})
-                """, (playlist_id, *videos_to_remove))
-                stats['removed'] = len(videos_to_remove)
+                            INSERT INTO playlist_videos (playlist_id, video_id, position)
+                            VALUES (?, ?, ?)
+                        """, (playlist_id, video_id, position))
+                        stats['inserted'] += 1
                 
-            # Commit all changes
-            cursor.execute("COMMIT")
-            return stats
-            
-        except Exception as e:
-            cursor.execute("ROLLBACK")
-            print(f"Error associating videos with playlist {playlist_id}: {e}")
-            return {'updated': 0, 'inserted': 0, 'removed': 0}
+                # Remove associations for videos no longer in the playlist
+                videos_to_remove = set(existing_videos.keys()) - new_video_ids
+                if videos_to_remove:
+                    placeholders = ','.join(['?'] * len(videos_to_remove))
+                    cursor.execute(f"""
+                        DELETE FROM playlist_videos 
+                        WHERE playlist_id = ? AND video_id IN ({placeholders})
+                    """, (playlist_id, *videos_to_remove))
+                    stats['removed'] = len(videos_to_remove)
+                    
+                # Commit all changes
+                cursor.execute("COMMIT")
+                return stats
+                
+            except Exception as e:
+                cursor.execute("ROLLBACK")
+                print(f"Database error in _associate_videos_with_playlist: {e}. Rolling back transaction.")
+                raise
         
         
     def get_playlist(self, playlist_id: str) -> Union[Dict, None]:
@@ -976,10 +1011,11 @@ class SQLiteStorage:
         :param playlist_id: The unique identifier of the playlist
         :return: Dictionary containing playlist information or None if not found
         """
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
     
     def _playlist_exists(self, playlist_id: str) -> bool:
         """
@@ -988,9 +1024,10 @@ class SQLiteStorage:
         :param playlist_id: The unique identifier of the playlist
         :return: True if the playlist exists, False otherwise
         """
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT 1 FROM playlists WHERE id = ?", (playlist_id,))
-        return cursor.fetchone() is not None
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT 1 FROM playlists WHERE id = ?", (playlist_id,))
+            return cursor.fetchone() is not None
     
 
     def list_playlists(self, limit: int = None, sort_by: str = "title", channel_id: str = None) -> List[dict]:
@@ -1002,42 +1039,43 @@ class SQLiteStorage:
         :param channel_id: Optional. Filter playlists by a specific channel ID.
         :return: A list of playlist dictionaries (id, title, channel_id, video_count, modified_date, last_updated).
         """
-        # Validate channel_id if provided
-        if channel_id and not self._channel_exists(channel_id):
-            raise ValueError(f"Channel with ID '{channel_id}' does not exist.")
-        
-        cursor = self.conn.cursor()
-        
-        allowed_sort_columns = ["title", "channel_id", "video_count"]
-        if sort_by not in allowed_sort_columns:
-            print(f"WARNING: Invalid sort_by column '{sort_by}' for list_playlists. Defaulting to 'title'.")
-            sort_by = "title"
+        with self.lock:
+            # Validate channel_id if provided
+            if channel_id and not self._channel_exists(channel_id):
+                raise ValueError(f"Channel with ID '{channel_id}' does not exist.")
+            
+            cursor = self.conn.cursor()
+            
+            allowed_sort_columns = ["title", "channel_id", "video_count"]
+            if sort_by not in allowed_sort_columns:
+                print(f"WARNING: Invalid sort_by column '{sort_by}' for list_playlists. Defaulting to 'title'.")
+                sort_by = "title"
 
-        db_sort_column = "p.title" # Default
-        if sort_by == "title":
-            db_sort_column = "p.title"
-        elif sort_by == "video_count":
-            db_sort_column = "p.video_count"
-        elif sort_by == "channel_title":
-            db_sort_column = "c.name"
+            db_sort_column = "p.title" # Default
+            if sort_by == "title":
+                db_sort_column = "p.title"
+            elif sort_by == "video_count":
+                db_sort_column = "p.video_count"
+            elif sort_by == "channel_title":
+                db_sort_column = "c.name"
 
-        query = "SELECT p.id, p.title, c.name AS channel_title, p.video_count FROM playlists p JOIN channels c ON p.channel_id = c.id"
-        params = []
+            query = "SELECT p.id, p.title, c.name AS channel_title, p.video_count FROM playlists p JOIN channels c ON p.channel_id = c.id"
+            params = []
 
-        if channel_id:
-            query += " WHERE channel_id = ?"
-            params.append(channel_id)
-        
-        query += f" ORDER BY {db_sort_column} ASC"  # Default to ascending order}"
+            if channel_id:
+                query += " WHERE channel_id = ?"
+                params.append(channel_id)
+            
+            query += f" ORDER BY {db_sort_column} ASC"  # Default to ascending order}"
 
-        # Apply limit if provided
-        if limit is not None and limit > 0:
-            query += " LIMIT ?"
-            params.append(limit)
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows] if rows else []
+            # Apply limit if provided
+            if limit is not None and limit > 0:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
         
     
     def get_playlist_videos(self, playlist_id: str, limit: int = None, sort_by: str = "position") -> List[dict]:
@@ -1049,46 +1087,47 @@ class SQLiteStorage:
         :param sort_by: Column to sort videos by. Valid values are 'position', 'published_at', 'title'.
         :return: A list of video dictionaries.
         """
-        # Check if the playlist exists first
-        if not self._playlist_exists(playlist_id):
-            raise ValueError(f"Playlist with ID '{playlist_id}' not found.")
-        
-        cursor = self.conn.cursor()
-        
-        essential_fields = ['v.id', 'v.title', 'v.published_at', 'pv.position']
-        select_columns = ", ".join(essential_fields)
+        with self.lock:
+            # Check if the playlist exists first
+            if not self._playlist_exists(playlist_id):
+                raise ValueError(f"Playlist with ID '{playlist_id}' not found.")
+            
+            cursor = self.conn.cursor()
+            
+            essential_fields = ['v.id', 'v.title', 'v.published_at', 'pv.position']
+            select_columns = ", ".join(essential_fields)
 
-        allowed_sort_columns = ['position', 'published_at', 'title'] 
-        if sort_by not in allowed_sort_columns:
-            print(f"WARNING: Invalid sort_by column '{sort_by}' for get_playlist_videos. It must be one of {allowed_sort_columns}. Defaulting to 'published_at'.")
-            sort_by = 'published_at'
+            allowed_sort_columns = ['position', 'published_at', 'title'] 
+            if sort_by not in allowed_sort_columns:
+                print(f"WARNING: Invalid sort_by column '{sort_by}' for get_playlist_videos. It must be one of {allowed_sort_columns}. Defaulting to 'published_at'.")
+                sort_by = 'published_at'
 
-        # Map allowed_sort_columns to actual DB columns with table prefix
-        sort_column_map = {
-            'position': 'pv.position',
-            'published_at': 'v.published_at',
-            'title': 'v.title',
-        }
-        db_sort_column = sort_column_map.get(sort_by)
+            # Map allowed_sort_columns to actual DB columns with table prefix
+            sort_column_map = {
+                'position': 'pv.position',
+                'published_at': 'v.published_at',
+                'title': 'v.title',
+            }
+            db_sort_column = sort_column_map.get(sort_by)
 
-        # Query using the junction table
-        query = f"""
-            SELECT {select_columns} 
-            FROM videos v
-            JOIN playlist_videos pv ON v.id = pv.video_id
-            WHERE pv.playlist_id = ?
-            ORDER BY {db_sort_column} ASC
-        """
-        
-        params = [playlist_id]
-        
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows] if rows else []
+            # Query using the junction table
+            query = f"""
+                SELECT {select_columns} 
+                FROM videos v
+                JOIN playlist_videos pv ON v.id = pv.video_id
+                WHERE pv.playlist_id = ?
+                ORDER BY {db_sort_column} ASC
+            """
+            
+            params = [playlist_id]
+            
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
     
     def delete_playlist(self, playlist_id: str) -> bool:
         """
@@ -1103,22 +1142,28 @@ class SQLiteStorage:
         :return: True if deletion was successful.
         :raises ValueError: If the playlist does not exist.
         """
-        # This check is necessary to signal "not found" as a distinct error.
-        if not self._playlist_exists(playlist_id):
-            raise ValueError(f"Playlist with ID '{playlist_id}' not found.")
+        with self.lock:
+            try:
+                # This check is necessary to signal "not found" as a distinct error.
+                if not self._playlist_exists(playlist_id):
+                    raise ValueError(f"Playlist with ID '{playlist_id}' not found.")
 
-        cursor = self.conn.cursor()
-        
-        # This action can raise sqlite3.Error, which will now correctly propagate.
-        cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
-        self.conn.commit()
-        
-        if cursor.rowcount > 0:
-            print(f"Successfully deleted playlist {playlist_id} and its associations.")
-            return True
-        
-        # This case should not be reached if _playlist_exists passed, but is a safeguard.
-        return False
+                cursor = self.conn.cursor()
+                
+                # This action can raise sqlite3.Error, which will now correctly propagate.
+                cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+                self.conn.commit()
+                
+                if cursor.rowcount > 0:
+                    print(f"Successfully deleted playlist {playlist_id} and its associations.")
+                    return True
+                
+                # This case should not be reached if _playlist_exists passed, but is a safeguard.
+                return False
+            except Exception as e:
+                print(f"Database error in delete_playlist: {e}. Rolling back transaction.")
+                self.conn.rollback()
+                raise
 
     def close(self):
         """
