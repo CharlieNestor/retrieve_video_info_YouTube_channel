@@ -163,7 +163,7 @@ class ChannelManager:
                 sorted by date (newest first) or empty list if none found
         """
         # Verify channel exists first, and raise an error if it does not.
-        if not self.storage._channel_exists(channel_id):
+        if not self.get_channel(channel_id):
             raise ValueError(f"Channel with id '{channel_id}' not found.")
         
         # Delegate the call to the storage layer.

@@ -29,6 +29,13 @@ demo_yt_client.ipynb
 # .py files
 demo_yt_client.py
 
-# Frontend dependencies and build output
+# Frontend builds
 frontend/node_modules
 frontend/dist
+frontend/.pnp
+frontend/.pnp.js
+
+# Environment variables for frontend
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local

@@ -110,7 +110,7 @@ class VideoManager:
 
         # If channel doesn't exist, fetch and save it
         channel_id = video_info.get('channel_id')
-        if channel_id and not self.storage._channel_exists(channel_id):
+        if channel_id and not self.channel_manager.get_channel(channel_id):
             print(f"WARNING: Channel {channel_id} for video {video_id} not found in DB. Fetching channel info...")
             self.channel_manager.process(channel_id)
 
@@ -146,7 +146,7 @@ class VideoManager:
 
             # Ensure channel exists (minimal check/fetch, don't force update channel)
             channel_id = video_info.get('channel_id')
-            if channel_id and not self.storage.channel_exists(channel_id):
+            if channel_id and not self.channel_manager.get_channel(channel_id):
                 print(f"Warning: Channel {channel_id} for video {video_id} not found during update. Fetching channel info...")
                 try:
                     self.channel_manager.process(channel_id, force_update=False) # Don't force channel update

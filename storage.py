@@ -18,7 +18,7 @@ class SQLiteStorage:
         """
         self.db_path = db_path
         self.conn = None    # TODO: Implement better connection management
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self._connect()
         self._create_schema()
 
