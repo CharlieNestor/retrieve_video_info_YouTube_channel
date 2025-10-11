@@ -1,11 +1,12 @@
-import React from 'react';
-import ExpandableText from './ExpandableText.jsx'; // Import our new component
+import React, { useState, useEffect } from 'react';
+import { Card, Row, Col } from 'react-bootstrap';
+import ExpandableText from './ExpandableText.jsx';
 
 // --- Styles ---
 const cardStyle = {
   border: '1px solid #555',
   borderRadius: '8px',
-  padding: '1rem',
+  padding: '1.5rem',
   marginBottom: '1rem',
   textAlign: 'left',
   background: '#2a2a2a'
@@ -14,7 +15,8 @@ const cardStyle = {
 const headingStyle = {
   marginTop: 0,
   borderBottom: '1px solid #555',
-  paddingBottom: '0.5rem'
+  paddingBottom: '0.5rem',
+  marginBottom: '1rem'
 };
 
 const detailRowStyle = {
@@ -55,11 +57,25 @@ const formatDuration = (seconds) => {
   return `${hStr}${mStr}:${sStr}`;
 };
 
-
+// --- Main Component ---
 function ResultDisplay({ result }) {
-  if (!result) {
-    return null;
-  }
+  const [channelThumbnail, setChannelThumbnail] = useState(null);
+
+  useEffect(() => {
+    setChannelThumbnail(null); // Reset on new result
+    if (result && result.playlist && result.playlist.channel_id) {
+      fetch(`http://127.0.0.1:8000/api/channels/${result.playlist.channel_id}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data && data.thumbnail_url) {
+            setChannelThumbnail(data.thumbnail_url);
+          }
+        })
+        .catch(error => console.error("Failed to fetch channel thumbnail for playlist:", error));
+    }
+  }, [result]);
+
+  if (!result) return null;
 
   if (result.error) {
     return (
@@ -70,50 +86,71 @@ function ResultDisplay({ result }) {
     );
   }
 
+  const item = result.channel || result.video || result.playlist;
+  if (!item) return null;
+
+  const itemType = result.channel ? 'channel' : (result.video ? 'video' : 'playlist');
+  const thumbnailUrl = itemType === 'playlist' ? channelThumbnail : item.thumbnail_url;
+
+  const renderMetadata = () => {
+    switch (itemType) {
+      case 'channel':
+        return (
+          <>
+            <div style={detailRowStyle}><span style={labelStyle}>Name:</span><span>{item.name}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Subscribers:</span><span>{item.subscriber_count?.toLocaleString()}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Total Videos:</span><span>{item.video_count}</span></div>
+            {item.content_breakdown && (
+              <div style={detailRowStyle}><span style={labelStyle}>Content:</span><span>{Object.entries(JSON.parse(item.content_breakdown)).map(([type, count]) => `${type}: ${count}`).join(', ')}</span></div>
+            )}
+          </>
+        );
+      case 'video':
+        return (
+          <>
+            <div style={detailRowStyle}><span style={labelStyle}>Title:</span><span>{item.title}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Channel:</span><span>{item.channel_title}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Published:</span><span>{formatDate(item.published_at)}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Duration:</span><span>{formatDuration(item.duration)}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Views:</span><span>{item.view_count?.toLocaleString()}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Likes:</span><span>{item.like_count?.toLocaleString()}</span></div>
+          </>
+        );
+      case 'playlist':
+        return (
+          <>
+            <div style={detailRowStyle}><span style={labelStyle}>Title:</span><span>{item.title}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Channel:</span><span>{item.channel_title}</span></div>
+            <div style={detailRowStyle}><span style={labelStyle}>Video Count:</span><span>{item.video_count}</span></div>
+          </>
+        );
+      default: return null;
+    }
+  };
+
   return (
-    <div>
-      {result.channel && (
-        <div style={cardStyle}>
-          <h3 style={headingStyle}>Channel Details</h3>
-          <div style={detailRowStyle}><span style={labelStyle}>Name:</span><span>{result.channel.name}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Subscribers:</span><span>{result.channel.subscriber_count?.toLocaleString()}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Total Videos:</span><span>{result.channel.video_count}</span></div>
-          {result.channel.content_breakdown && (
-             <div style={detailRowStyle}><span style={labelStyle}>Content:</span><span>{Object.entries(JSON.parse(result.channel.content_breakdown)).map(([type, count]) => `${type}: ${count}`).join(', ')}</span></div>
-          )}
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>Description:</span>
-            <ExpandableText text={result.channel.description} maxLength={200} />
-          </div>
-        </div>
-      )}
+    <div style={cardStyle}>
+      <h3 style={headingStyle}>{`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} Details`}</h3>
+      
+      <Row>
+        {/* Left Column: Metadata */}
+        <Col md={thumbnailUrl ? 8 : 12}>
+          {renderMetadata()}
+        </Col>
 
-      {result.video && (
-        <div style={cardStyle}>
-          <h3 style={headingStyle}>Video Details</h3>
-          <div style={detailRowStyle}><span style={labelStyle}>Title:</span><span>{result.video.title}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Channel:</span><span>{result.video.channel_title}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Published:</span><span>{formatDate(result.video.published_at)}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Duration:</span><span>{formatDuration(result.video.duration)}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Views:</span><span>{result.video.view_count?.toLocaleString()}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Likes:</span><span>{result.video.like_count?.toLocaleString()}</span></div>
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>Description:</span>
-            <ExpandableText text={result.video.description} maxLength={200} />
-          </div>
-        </div>
-      )}
+        {/* Right Column: Thumbnail */}
+        {thumbnailUrl && (
+          <Col md={4} className="d-flex align-items-center justify-content-center">
+            <Card.Img src={thumbnailUrl} className="result-thumbnail" />
+          </Col>
+        )}
+      </Row>
 
-      {result.playlist && (
-        <div style={cardStyle}>
-          <h3 style={headingStyle}>Playlist Details</h3>
-          <div style={detailRowStyle}><span style={labelStyle}>Title:</span><span>{result.playlist.title}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Channel:</span><span>{result.playlist.channel_title}</span></div>
-          <div style={detailRowStyle}><span style={labelStyle}>Video Count:</span><span>{result.playlist.video_count}</span></div>
-          <div style={detailRowStyle}>
-            <span style={labelStyle}>Description:</span>
-            <ExpandableText text={result.playlist.description} maxLength={200} />
-          </div>
+      {/* Bottom Section: Description */}
+      {item.description && (
+        <div style={{...detailRowStyle, marginTop: '1rem'}}>
+          <span style={labelStyle}>Description:</span>
+          <ExpandableText text={item.description} maxLength={200} />
         </div>
       )}
     </div>

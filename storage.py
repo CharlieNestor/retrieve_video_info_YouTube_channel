@@ -277,7 +277,7 @@ class SQLiteStorage:
         """
         with self.lock:
             cursor = self.conn.cursor()
-            query = "SELECT id, name FROM channels"
+            query = "SELECT id, name, thumbnail_url FROM channels"
             if sort_by:
                 if sort_by in ['id', 'name']:
                     query += f" ORDER BY {sort_by}"

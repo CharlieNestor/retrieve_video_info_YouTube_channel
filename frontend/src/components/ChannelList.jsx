@@ -1,13 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Spinner, Alert } from 'react-bootstrap';
-
-// Style for the floating card container
-const cardStyle = {
-  background: '#2a2a2a',
-  borderRadius: '8px',
-  padding: '2rem',
-  border: '1px solid #444',
-};
+import { Card, Spinner, Alert, Row, Col } from 'react-bootstrap';
 
 function ChannelList() {
   const [channels, setChannels] = useState([]);
@@ -24,7 +16,9 @@ function ChannelList() {
         return response.json();
       })
       .then(data => {
-        setChannels(data);
+        // Sort channels alphabetically by name
+        const sortedData = data.sort((a, b) => a.name.localeCompare(b.name));
+        setChannels(sortedData);
         setLoading(false);
       })
       .catch(error => {
@@ -34,42 +28,38 @@ function ChannelList() {
       });
   }, []);
 
-  let cardContent;
+  let content;
   if (loading) {
-    cardContent = <Spinner animation="border" role="status"><span className="visually-hidden">Loading...</span></Spinner>;
+    content = <div className="text-center"><Spinner animation="border" role="status"><span className="visually-hidden">Loading...</span></Spinner></div>;
   } else if (error) {
-    cardContent = <Alert variant="danger">{error}</Alert>;
+    content = <Alert variant="danger">{error}</Alert>;
   } else if (channels.length === 0) {
-    cardContent = <p>No channels have been added to the library yet.</p>;
+    content = <p>No channels have been added to the library yet.</p>;
   } else {
-    cardContent = (
-      <Table hover responsive variant="dark">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Channel Name</th>
-            <th>Subscribers</th>
-            <th>Videos</th>
-          </tr>
-        </thead>
-        <tbody>
-          {channels.map((channel, index) => (
-            <tr key={channel.id}>
-              <td>{index + 1}</td>
-              <td>{channel.name}</td>
-              <td>{channel.subs}</td>
-              <td>{channel.videos}</td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+    content = (
+      <Row xs={1} sm={2} md={3} lg={4} className="g-4">
+        {channels.map(channel => (
+          <Col key={channel.id}>
+            <Card className="channel-card h-100">
+              <Card.Img 
+                variant="top" 
+                src={channel.thumbnail_url || 'https://via.placeholder.com/150'} 
+                className="channel-card-img"
+              />
+              <Card.Body>
+                <Card.Title className="channel-card-title">{channel.name}</Card.Title>
+              </Card.Body>
+            </Card>
+          </Col>
+        ))}
+      </Row>
     );
   }
 
   return (
-    <div style={cardStyle}>
+    <div>
       <h2 className="mb-4">Channels in Library</h2>
-      {cardContent}
+      {content}
     </div>
   );
 }
