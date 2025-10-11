@@ -1,0 +1,23 @@
+.App {
+  min-height: 100vh;
+}
+
+/* Header Styles */
+.app-header {
+  padding: 5rem 1rem 1rem; /* Further adjusted bottom padding */
+  text-align: center;
+}
+
+.app-title {
+  font-size: 2.5rem; /* Larger font for the main title */
+  font-weight: bold;
+  margin-bottom: 6rem; /* Further increased space between title and form */
+}
+
+.url-form-container {
+  display: flex;
+  justify-content: center;
+}
+
+/* Sidebar Styles */
+/* The .app-sidebar class is no longer used. */
