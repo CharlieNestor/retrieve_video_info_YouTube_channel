@@ -40,6 +40,19 @@ function ChannelDetailView({ channelId, onBack }) {
     return <Alert variant="warning">Channel data could not be loaded.</Alert>;
   }
 
+  const formatVideoDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return dateString; // Fallback to original string if parsing fails
+    }
+  };
+
   return (
     <Card className="channel-detail-card">
       <Card.Body>
@@ -47,9 +60,23 @@ function ChannelDetailView({ channelId, onBack }) {
           &larr; Back to Channel List
         </Button>
 
+        {details.banner_url && (
+          <img 
+            src={details.banner_url} 
+            alt={`${details.name} banner`} 
+            style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '1.5rem' }} 
+          />
+        )}
+
         <Row>
           <Col md={8}>
             <Card.Title as="h2" className="mb-3">{details.name}</Card.Title>
+            <p>
+              <strong>Link:</strong>{' '}
+              <a href={`https://www.youtube.com/channel/${details.id}`} target="_blank" rel="noopener noreferrer">
+                {`https://www.youtube.com/channel/${details.id}`}
+              </a>
+            </p>
             <p><strong>Subscribers:</strong> {details.subscriber_count?.toLocaleString() || 'N/A'}</p>
             <p><strong>Total Videos:</strong> {details.video_count || 'N/A'}</p>
             {details.description && <p className="mt-3">{details.description}</p>}
@@ -65,13 +92,27 @@ function ChannelDetailView({ channelId, onBack }) {
 
         <h4 className="mb-3">Videos in Library</h4>
         {videos.length > 0 ? (
-          <ListGroup variant="flush">
+          <div>
+            {/* Header Row */}
+            <Row className="border-bottom pb-2 mb-2 text-muted fw-bold">
+              <Col>Title</Col>
+              <Col md="auto">Published at</Col>
+              <Col md="auto" className="text-center">Downloaded</Col>
+            </Row>
+
+            {/* Video Rows */}
             {videos.map(video => (
-              <ListGroup.Item key={video.id} className="bg-transparent text-white">
-                {video.title}
-              </ListGroup.Item>
+              <Row key={video.id} className="py-2 border-bottom align-items-center">
+                <Col>{video.title}</Col>
+                <Col md="auto">{formatVideoDate(video.published_at)}</Col>
+                <Col md="auto" className="text-center" style={{ minWidth: '120px' }}>
+                  {video.file_path &&
+                    <span title="Downloaded" style={{ fontSize: '1.2rem', color: '#28a745' }}>✓</span>
+                  }
+                </Col>
+              </Row>
             ))}
-          </ListGroup>
+          </div>
         ) : (
           <p>No videos from this channel have been saved to the library yet.</p>
         )}

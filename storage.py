@@ -189,13 +189,16 @@ class SQLiteStorage:
             try:
                 cursor = self.conn.cursor()
                 
-                # Extract only the profile picture URL from the thumbnail dictionary
+                # Extract profile picture and banner URLs from the thumbnail dictionary
                 thumbnail_url = None
-                if isinstance(channel_data.get('thumbnail_url'), dict):
-                    thumbnail_url = channel_data.get('thumbnail_url', {}).get('profile_picture')
+                banner_url = None
+                thumbnail_data = channel_data.get('thumbnail_url')
+                if isinstance(thumbnail_data, dict):
+                    thumbnail_url = thumbnail_data.get('profile_picture')
+                    banner_url = thumbnail_data.get('banner')
                 else:
-                    thumbnail_url = channel_data.get('thumbnail_url')
-                    
+                    thumbnail_url = thumbnail_data
+
                 # Use the total video count directly
                 video_count = channel_data.get('video_count')
                 
@@ -205,24 +208,20 @@ class SQLiteStorage:
                     content_breakdown = json.dumps(content_breakdown)
                 
                 # SQL for inserting a new channel or updating an existing one.
-                # created_at is set to CURRENT_TIMESTAMP on initial insert.
-                # last_updated is set to CURRENT_TIMESTAMP on both insert and update.
-                # On conflict (update), created_at is NOT modified.
                 sql = """
-                    -- insertion
                     INSERT INTO channels (
                         id, name, description, subscriber_count, video_count, 
-                        thumbnail_url, content_breakdown, 
+                        thumbnail_url, banner_url, content_breakdown, 
                         created_at, 
                         last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    -- update
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         description = excluded.description,
                         subscriber_count = excluded.subscriber_count,
                         video_count = excluded.video_count,
                         thumbnail_url = excluded.thumbnail_url,
+                        banner_url = excluded.banner_url,
                         content_breakdown = excluded.content_breakdown,
                         last_updated = CURRENT_TIMESTAMP
                 """
@@ -233,6 +232,7 @@ class SQLiteStorage:
                     channel_data.get('subscriber_count'),
                     video_count,
                     thumbnail_url,
+                    banner_url,
                     content_breakdown
                 )
                 cursor.execute(sql, params)
@@ -436,7 +436,7 @@ class SQLiteStorage:
             cursor = self.conn.cursor()
 
             # Build the query with optional limit and sorting
-            query = "SELECT id, title FROM videos WHERE channel_id = ?"
+            query = "SELECT id, title, published_at, file_path FROM videos WHERE channel_id = ?"
 
             # Apply sorting based on the validated sort_by parameter
             if sort_by == 'published_at':

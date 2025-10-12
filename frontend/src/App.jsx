@@ -89,7 +89,7 @@ function App() {
           </Row>
         )}
 
-        <Row>
+        <Row className="mt-5">
           <Col md={3} lg={2}>
             <Sidebar 
               onShowChannels={handleShowChannels}
