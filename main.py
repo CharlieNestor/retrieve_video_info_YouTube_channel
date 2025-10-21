@@ -1,6 +1,8 @@
 import sqlite3
+import requests
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from youtube_client import YouTubeClient
 
@@ -33,6 +35,28 @@ app.add_middleware(
 # Instantiate the YouTubeClient
 # This single client instance will be shared across all API requests.
 client = YouTubeClient()
+
+
+@app.get("/api/image-proxy")
+def image_proxy(url: str = Query(...)):
+    """
+    Acts as a proxy for fetching images from external URLs.
+    This helps to avoid client-side rate-limiting issues.
+    """
+    try:
+        # Make a streaming request to the external URL
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+
+        # Get the content type from the original response
+        media_type = response.headers.get('content-type')
+
+        # Stream the content back to the client
+        return StreamingResponse(response.iter_content(chunk_size=8192), media_type=media_type)
+
+    except requests.exceptions.RequestException as e:
+        # Handle exceptions from the requests library (e.g., connection errors, timeouts)
+        raise HTTPException(status_code=502, detail=f"Failed to fetch image from external source: {e}")
 
 
 @app.post("/api/url", status_code=201)

@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Spinner, Alert, Row, Col, Button, ListGroup } from 'react-bootstrap';
 
+// Helper to create the proxy URL
+const getProxyUrl = (url) => {
+  if (!url) return '';
+  return `http://127.0.0.1:8000/api/image-proxy?url=${encodeURIComponent(url)}`;
+};
+
 // --- Detail View for a Single Channel ---
 function ChannelDetailView({ channelId, onBack }) {
   const [details, setDetails] = useState(null);
@@ -62,7 +68,7 @@ function ChannelDetailView({ channelId, onBack }) {
 
         {details.banner_url && (
           <img 
-            src={details.banner_url} 
+            src={getProxyUrl(details.banner_url)} 
             alt={`${details.name} banner`} 
             style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '1.5rem' }} 
           />
@@ -83,7 +89,7 @@ function ChannelDetailView({ channelId, onBack }) {
           </Col>
           <Col md={4} className="d-flex align-items-center justify-content-center">
             {details.thumbnail_url && 
-              <Card.Img src={details.thumbnail_url} className="result-thumbnail" />
+              <Card.Img src={getProxyUrl(details.thumbnail_url)} className="result-thumbnail" />
             }
           </Col>
         </Row>
@@ -169,7 +175,7 @@ function ChannelList() {
             >
               <Card.Img 
                 variant="top" 
-                src={channel.thumbnail_url || 'https://via.placeholder.com/150'} 
+                src={getProxyUrl(channel.thumbnail_url) || 'https://via.placeholder.com/150'} 
                 className="channel-card-img"
               />
               <Card.Body>

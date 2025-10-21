@@ -19,6 +19,13 @@ function App() {
   const [showPlaylists, setShowPlaylists] = useState(false);
   const [showVideos, setShowVideos] = useState(false);
 
+  // State to force re-mounting of list components
+  const [viewKeys, setViewKeys] = useState({
+    channels: 0,
+    playlists: 0,
+    videos: 0,
+  });
+
   // --- Handlers --- //
 
   const handleUrlSubmit = (url) => {
@@ -46,22 +53,25 @@ function App() {
   };
 
   const handleShowChannels = () => {
-    // Show channels, hide other lists, but DO NOT touch lastResult
     setShowPlaylists(false);
     setShowVideos(false);
     setShowChannels(true);
+    // Increment key to force ChannelList to re-mount and reset its internal state
+    setViewKeys(keys => ({ ...keys, channels: keys.channels + 1 }));
   };
 
   const handleShowPlaylists = () => {
     setShowChannels(false);
     setShowVideos(false);
     setShowPlaylists(true);
+    setViewKeys(keys => ({ ...keys, playlists: keys.playlists + 1 }));
   };
 
   const handleShowVideos = () => {
     setShowChannels(false);
     setShowPlaylists(false);
     setShowVideos(true);
+    setViewKeys(keys => ({ ...keys, videos: keys.videos + 1 }));
   };
 
   return (
@@ -98,9 +108,9 @@ function App() {
             />
           </Col>
           <Col md={9} lg={10}>
-            {showChannels && <ChannelList />}
-            {showPlaylists && <PlaylistList />}
-            {showVideos && <VideoList />}
+            {showChannels && <ChannelList key={viewKeys.channels} />}
+            {showPlaylists && <PlaylistList key={viewKeys.playlists} />}
+            {showVideos && <VideoList key={viewKeys.videos} />}
           </Col>
         </Row>
       </Container>

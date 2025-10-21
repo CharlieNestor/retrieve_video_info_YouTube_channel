@@ -2,6 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Card, Row, Col } from 'react-bootstrap';
 import ExpandableText from './ExpandableText.jsx';
 
+// Helper to create the proxy URL
+const getProxyUrl = (url) => {
+  if (!url) return '';
+  return `http://127.0.0.1:8000/api/image-proxy?url=${encodeURIComponent(url)}`;
+};
+
 // --- Styles ---
 const cardStyle = {
   border: '1px solid #555',
@@ -141,7 +147,7 @@ function ResultDisplay({ result }) {
         {/* Right Column: Thumbnail */}
         {thumbnailUrl && (
           <Col md={4} className="d-flex align-items-center justify-content-center">
-            <Card.Img src={thumbnailUrl} className="result-thumbnail" />
+            <Card.Img src={getProxyUrl(thumbnailUrl)} className="result-thumbnail" />
           </Col>
         )}
       </Row>
