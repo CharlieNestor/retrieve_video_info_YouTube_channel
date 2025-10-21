@@ -192,6 +192,14 @@ class VideoManager:
         """
         return self.storage.list_channel_videos(channel_id)
 
+    def list_all_videos(self) -> list:
+        """
+        Retrieves a list of all videos from the database.
+
+        :return: A list of video dictionaries.
+        """
+        return self.storage.list_all_videos()
+
     def download_video(self, video_id: str, force_download: bool=False) -> str:
             """
             Downloads a video file, updates its status in the database, 

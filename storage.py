@@ -400,7 +400,12 @@ class SQLiteStorage:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM videos WHERE id = ?", (video_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None # Convert Row to dict if found
+            
+            if row:
+                video_data = dict(row)
+                video_data['tags'] = self.get_tags_video(video_id)
+                return video_data
+            return None # Convert Row to dict if found
     
     def _video_exists(self, video_id: str) -> bool:
         """

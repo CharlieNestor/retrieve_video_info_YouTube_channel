@@ -39,6 +39,16 @@ function VideoDetailView({ videoId, onBack }) {
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [copyButtonText, setCopyButtonText] = useState('Copy Path');
+
+  const handleCopy = (text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopyButtonText('Copied!');
+      setTimeout(() => setCopyButtonText('Copy Path'), 2000); // Reset after 2 seconds
+    }, (err) => {
+      console.error('Failed to copy: ', err);
+    });
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -70,7 +80,7 @@ function VideoDetailView({ videoId, onBack }) {
 
   return (
     <Card className="channel-detail-card"> {/* Reusing similar styling */}
-      <Card.Body>
+      <Card.Body className="pb-5">
         <Button variant="outline-secondary" onClick={onBack} className="back-button mb-4">
           &larr; Back to Video List
         </Button>
@@ -86,12 +96,37 @@ function VideoDetailView({ videoId, onBack }) {
             />
         )}
 
-        <p>
-          <strong>Link:</strong>{' '}
-          <a href={`https://www.youtube.com/watch?v=${details.id}`} target="_blank" rel="noopener noreferrer">
-            {`https://www.youtube.com/watch?v=${details.id}`}
-          </a>
-        </p>
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <p className="mb-0">
+            <strong>Link:</strong>{' '}
+            <a href={`https://www.youtube.com/watch?v=${details.id}`} target="_blank" rel="noopener noreferrer">
+              {`https://www.youtube.com/watch?v=${details.id}`}
+            </a>
+          </p>
+          <div style={{ marginLeft: 'auto', paddingRight: '40px' }}>
+            {details.downloaded ? (
+              <Badge bg="success">Downloaded</Badge>
+            ) : (
+              <Badge bg="secondary">Not Downloaded</Badge>
+            )}
+          </div>
+        </div>
+
+        {details.downloaded === 1 && details.file_path && (
+          <div className="mb-3">
+            <div className="d-flex justify-content-between align-items-center">
+                <p className="mb-1"><strong>File Path:</strong></p>
+                <div style={{ paddingRight: '40px' }}>
+                    <Button style={{ whiteSpace: 'nowrap' }} variant="outline-secondary" size="sm" onClick={() => handleCopy(details.file_path)}>
+                        {copyButtonText}
+                    </Button>
+                </div>
+            </div>
+            <p className="text-muted" style={{ wordBreak: 'break-all' }}>
+              {details.file_path}
+            </p>
+          </div>
+        )}
 
         <Row className="mb-3">
             <Col><strong>Views:</strong> {details.view_count?.toLocaleString() || 'N/A'}</Col>
@@ -100,8 +135,19 @@ function VideoDetailView({ videoId, onBack }) {
             <Col><strong>Published:</strong> {formatDate(details.published_at)}</Col>
         </Row>
 
+        {details.tags && details.tags.length > 0 && (
+          <div className="mt-3 mb-3">
+            <strong>Tags:</strong>{' '}
+            {details.tags.map((tag, index) => (
+              <Badge key={index} bg="secondary" className="me-1 mb-1">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
+
         {details.description && (
-            <div className="mt-3">
+            <div className="mt-3 mb-5">
                 <strong>Description:</strong>
                 <ExpandableText text={details.description} maxLength={250} />
             </div>
