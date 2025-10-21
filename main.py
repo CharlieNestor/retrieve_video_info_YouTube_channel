@@ -1,8 +1,11 @@
 import sqlite3
 import requests
+import os
+import hashlib
+import time
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from youtube_client import YouTubeClient
 
@@ -41,22 +44,65 @@ client = YouTubeClient()
 def image_proxy(url: str = Query(...)):
     """
     Acts as a proxy for fetching images from external URLs.
-    This helps to avoid client-side rate-limiting issues.
+    This helps to avoid client-side rate-limiting issues and handles thumbnail fallbacks.
+    It also uses a 7-day TTL disk cache to improve performance and reduce requests.
     """
-    try:
-        # Make a streaming request to the external URL
-        response = requests.get(url, stream=True)
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+    # --- Caching Configuration ---
+    cache_dir = os.path.join(client.downloader.download_dir, "image_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_ttl_seconds = 7 * 24 * 60 * 60  # 7 days
 
-        # Get the content type from the original response
-        media_type = response.headers.get('content-type')
+    # Generate a safe filename from the URL
+    url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()
+    # Try to get a file extension, default to .jpg
+    file_extension = os.path.splitext(url.split('?')[0])[-1] or '.jpg'
+    if not file_extension.startswith('.'):
+        file_extension = '.jpg' # Fallback for URLs without clear extensions
+    cache_path = os.path.join(cache_dir, f"{url_hash}{file_extension}")
 
-        # Stream the content back to the client
-        return StreamingResponse(response.iter_content(chunk_size=8192), media_type=media_type)
+    # --- Cache Check ---
+    if os.path.exists(cache_path):
+        file_age = time.time() - os.path.getmtime(cache_path)
+        if file_age < cache_ttl_seconds:
+            return FileResponse(cache_path)
 
-    except requests.exceptions.RequestException as e:
-        # Handle exceptions from the requests library (e.g., connection errors, timeouts)
-        raise HTTPException(status_code=502, detail=f"Failed to fetch image from external source: {e}")
+    # --- Fetching Logic (if cache miss or stale) ---
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    thumbnail_qualities = ['maxresdefault.jpg', 'hqdefault.jpg', 'sddefault.jpg', 'mqdefault.jpg']
+    is_yt_thumbnail = 'i.ytimg.com' in url
+
+    urls_to_try = [url]
+    if is_yt_thumbnail:
+        for quality in thumbnail_qualities:
+            if quality in url:
+                base_url = url.rsplit('/', 1)[0]
+                urls_to_try = list(dict.fromkeys([url] + [f"{base_url}/{q}" for q in thumbnail_qualities]))
+                break
+
+    for attempt_url in urls_to_try:
+        try:
+            response = requests.get(attempt_url, stream=True, headers=headers)
+            if response.status_code == 200:
+                # --- Save to Cache and Serve ---
+                with open(cache_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                return FileResponse(cache_path)
+
+            if response.status_code == 404 and len(urls_to_try) > 1:
+                continue
+            
+            response.raise_for_status()
+        except requests.exceptions.RequestException:
+            if attempt_url == urls_to_try[-1]:
+                raise
+            else:
+                continue
+
+    raise HTTPException(status_code=502, detail="Failed to fetch image from any of the fallback URLs.")
 
 
 @app.post("/api/url", status_code=201)
@@ -195,6 +241,19 @@ def get_channel_tags(channel_id: str, limit: int = None, min_video_count: int = 
 
 
 ##### VIDEO ENDPOINTS #####
+
+
+@app.get("/api/videos")
+def list_videos():
+    """
+    Retrieves a list of all videos stored in the database.
+    """
+    try:
+        return client.video_manager.list_all_videos()
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
 @app.get("/api/videos/{video_id}")

@@ -480,6 +480,23 @@ class SQLiteStorage:
             except Exception as e:
                 print(f"Error getting videos with download status: {e}")
                 return []
+
+    def list_all_videos(self) -> List[Dict]:
+        """
+        Retrieves a list of all videos from the database, sorted by publish date.
+
+        :return: A list of dictionaries, each representing a video.
+        """
+        with self.lock:
+            cursor = self.conn.cursor()
+            query = """
+                SELECT id, title, channel_title, published_at, duration, thumbnail_url, downloaded
+                FROM videos
+                ORDER BY published_at DESC
+            """
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []
         
     def _update_video_status(self, video_id: str, status: str) -> bool:
         """
