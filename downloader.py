@@ -1,8 +1,12 @@
 import os
+import re
+import time
 import yt_dlp
+import requests
 from datetime import datetime
 from typing import Dict, Any, Union, List
 from utils import format_datetime, sanitize_filename
+
 
 
 class MediaDownloader:
@@ -361,8 +365,290 @@ class MediaDownloader:
             print(f"Error fetching playlist info: {str(e)}")
             raise
 
+    def get_video_transcript(self, video_id: str, languages: List[str] = None) -> Dict[str, Any] | None:
+        """
+        Retrieves the best available transcript for a video with smart language detection.
 
-    # TODO: Implement get_video_transcript method
+        Strategy:
+        1. Detects the video's original language
+        2. If original is in requested languages, prioritizes that
+        3. Falls back to translations only if needed
+        
+        Priority within each category:
+        - Manual subtitles > Auto-generated
+        - Original language > Translated
+        
+        :param video_id: The YouTube video ID
+        :param languages: List of language codes in priority order (default: ['en', 'it'])
+        :return: Dictionary with 'vtt' content, 'lang' code, 'source' ('manual'/'automatic'),
+                and 'is_translation' (bool), or None if no suitable transcript found
+        """
+        if languages is None:
+            languages = ['en', 'it']
+        
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        
+        options = {
+            **self.common_options,
+            'skip_download': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': languages,
+            'subtitlesformat': 'vtt',
+            'extract_flat': False,
+        }
+        
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
+            
+            manual_subs = info.get('subtitles', {})
+            auto_subs = info.get('automatic_captions', {})
+
+            # Detect original video language
+            video_language = info.get('language')  # e.g., 'it', 'en', etc.
+            if not video_language:
+                # Fallback: Try to infer from available subtitles
+                # If only one language in manual subs, it's likely the original
+                if manual_subs and len(manual_subs) == 1:
+                    video_language = list(manual_subs.keys())[0]
+                elif auto_subs:
+                    # Check if any of our target languages has non-translated auto subs
+                    for lang in languages:
+                        if lang in auto_subs:
+                            sample_url = auto_subs[lang][0].get('url', '')
+                            if 'tlang=' not in sample_url:
+                                video_language = lang
+                                break
+            
+            print(f"DEBUG: Detected video language: {video_language}")
+            
+            # Reorder languages to prioritize original if detected
+            ordered_languages = languages.copy()
+            if video_language and video_language in ordered_languages:
+                # Move original language to front
+                ordered_languages.remove(video_language)
+                ordered_languages.insert(0, video_language)
+                print(f"DEBUG: Reordered language priority: {ordered_languages}")
+
+            # Priority 1: Try manual subtitles in language order
+            for lang in ordered_languages:
+                if lang in manual_subs and manual_subs[lang]:
+                    vtt_url = self._find_vtt_url(manual_subs[lang])
+                    if vtt_url:
+                        is_translation = 'tlang=' in vtt_url
+                        print(f"DEBUG: Trying manual {lang}: {vtt_url[:100]}...")
+                        vtt_content = self._fetch_vtt_content(vtt_url, video_id)
+                        if vtt_content:
+                            return {
+                                'vtt': vtt_content,
+                                'lang': lang,
+                                'source': 'manual',
+                                'is_translation': is_translation,
+                                'original_language': video_language
+                            }
+            
+            # Priority 2: Try auto-generated subtitles in language order
+            for lang in ordered_languages:
+                if lang in auto_subs and auto_subs[lang]:
+                    vtt_url = self._find_vtt_url(auto_subs[lang])
+                    if vtt_url:
+                        is_translation = 'tlang=' in vtt_url
+                        print(f"DEBUG: Trying automatic {lang}: {vtt_url[:100]}...")
+                        vtt_content = self._fetch_vtt_content(vtt_url, video_id)
+                        if vtt_content:
+                            return {
+                                'vtt': vtt_content,
+                                'lang': lang,
+                                'source': 'automatic',
+                                'is_translation': is_translation,
+                                'original_language': video_language
+                            }
+            
+            print(f"No suitable transcript found in languages {languages} for video {video_id}")
+            return None
+            
+        except Exception as e:
+            print(f"Error fetching transcript for video {video_id}: {str(e)}")
+            return None
+        
+        
+    def _find_vtt_url(self, subtitle_formats: List[Dict], prefer_original: bool = True) -> str | None:
+        """
+        Find or create VTT format URL from list of subtitle formats.
+        
+        :param subtitle_formats: List of subtitle format dictionaries from yt-dlp
+        :return: VTT URL or None
+        """
+        original_urls = []
+        translated_urls = []
+
+        # First pass: Categorize URLs by whether they're translations
+        for fmt in subtitle_formats:
+            url = fmt.get('url')
+            if not url:
+                continue
+            
+            # Check if it's already VTT format
+            if fmt.get('ext') == 'vtt':
+                if 'tlang=' not in url:
+                    original_urls.append(url)
+                else:
+                    translated_urls.append(url)
+            else:
+                # Need to convert to VTT
+                url_modified = re.sub(r'&fmt=[^&]+', '&fmt=vtt', url)
+                if url_modified == url and 'fmt=' not in url:
+                    separator = '&' if '?' in url else '?'
+                    url_modified = f"{url}{separator}fmt=vtt"
+                
+                if 'tlang=' not in url_modified:
+                    original_urls.append(url_modified)
+                else:
+                    translated_urls.append(url_modified)
+                
+                return url_modified
+        
+        # Return based on preference
+        if prefer_original:
+            # Try original first, then translations
+            if original_urls:
+                return original_urls[0]
+            elif translated_urls:
+                return translated_urls[0]
+        else:
+            # Return any available (original still preferred, but not strict)
+            if original_urls:
+                return original_urls[0]
+            elif translated_urls:
+                return translated_urls[0]
+        
+        return None
+        
+
+    def _fetch_vtt_content(self, vtt_url: str, video_id: str) -> str | None:
+        """
+        Helper method to fetch VTT content from a URL with retry logic.
+        
+        :param vtt_url: URL of the VTT subtitle file
+        :param video_id: Video ID for error reporting
+        :return: VTT content as string, or None on failure
+        """
+
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                # Add headers to appear more like a browser
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+                response = requests.get(vtt_url, timeout=10, headers=headers)
+                response.raise_for_status()
+                return response.text
+            
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (attempt + 1)
+                        print(f"Rate limited. Waiting {wait_time}s before retry {attempt + 2}/{max_retries}...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        print(f"Max INTERNAL retries reached for video {video_id}.")
+                        return None
+                else:
+                    print(f"HTTP error {e.response.status_code} fetching VTT for video {video_id}: {e}")
+                    return None
+                
+            except requests.exceptions.RequestException as e:
+                print(f"Error fetching VTT from {vtt_url} for video {video_id}: {e}")
+                return None
+        
+        return None
+
+    def extract_text_from_vtt(self, vtt_content: str) -> str | None:
+        """
+        Extract pure text from VTT content, removing timestamps, tags, and metadata.
+        Handles YouTube's specific VTT format with inline word-level timestamps.
+        
+        :param vtt_content: VTT format subtitle content
+        :return: Plain text transcript, or None if input is not valid VTT
+        """
+        
+        # Quick validation: Check if it's actually VTT format
+        if not vtt_content or not isinstance(vtt_content, str):
+            print("ERROR: Invalid input - content is empty or not a string")
+            return None
+        
+        content_check = vtt_content.strip()
+        
+        # Simple check: Must start with WEBVTT and contain timestamps
+        if not content_check.upper().startswith('WEBVTT'):
+            print("ERROR: Content does not start with WEBVTT header")
+            print(f"First 100 chars: {content_check[:100]}")
+            return None
+        
+        # Extract text
+        # PROBLEM: Youtube VTTs format has overlapping capitions in order to
+        # create a "scrolling" effect. We need to avoid duplicates.
+        lines = vtt_content.split('\n')
+        text_parts = []
+        seen_lines = set()  # Track lines we've already added
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Skip WEBVTT header and metadata lines
+            if (line.upper().startswith('WEBVTT') or 
+                line.startswith('Kind:') or 
+                line.startswith('Language:') or
+                line.upper().startswith('NOTE')):
+                continue
+            
+            # Skip timestamp lines (contain --> with optional alignment/position settings)
+            if '-->' in line:
+                continue
+            
+            # Skip sound descriptions like [Music], [Applause], etc.
+            if re.match(r'^\[.*\]$', line):
+                continue
+            
+            # Now process the caption text line
+            # Remove inline word-level timestamps: <00:00:02.320>
+            line = re.sub(r'<\d{2}:\d{2}:\d{2}\.\d{3}>', '', line)
+            
+            # Remove <c> tags (color/styling tags wrapping words)
+            line = re.sub(r'</?c[^>]*>', '', line)
+            
+            # Remove any other tags (like <i>, <b>, <u>)
+            line = re.sub(r'<[^>]+>', '', line)
+            
+            # Clean up extra whitespace
+            line = ' '.join(line.split())
+            
+            # Skip if we've already seen this exact text
+            if line and line not in seen_lines:
+                text_parts.append(line)
+                seen_lines.add(line)
+        
+        if not text_parts:
+            print("WARNING: No text content extracted from VTT")
+            return ""
+        
+        # Join with spaces and clean up any double spaces
+        result = ' '.join(text_parts)
+        result = ' '.join(result.split())  # Normalize whitespace
+        
+        return result
+
+        
     # TODO: Implement method to get the list of online available video for a channel
 
 
