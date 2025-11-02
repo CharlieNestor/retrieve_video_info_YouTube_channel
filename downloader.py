@@ -421,15 +421,12 @@ class MediaDownloader:
                                 video_language = lang
                                 break
             
-            print(f"DEBUG: Detected video language: {video_language}")
-            
             # Reorder languages to prioritize original if detected
             ordered_languages = languages.copy()
             if video_language and video_language in ordered_languages:
                 # Move original language to front
                 ordered_languages.remove(video_language)
                 ordered_languages.insert(0, video_language)
-                print(f"DEBUG: Reordered language priority: {ordered_languages}")
 
             # Priority 1: Try manual subtitles in language order
             for lang in ordered_languages:
@@ -437,7 +434,6 @@ class MediaDownloader:
                     vtt_url = self._find_vtt_url(manual_subs[lang])
                     if vtt_url:
                         is_translation = 'tlang=' in vtt_url
-                        print(f"DEBUG: Trying manual {lang}: {vtt_url[:100]}...")
                         vtt_content = self._fetch_vtt_content(vtt_url, video_id)
                         if vtt_content:
                             return {
@@ -454,7 +450,6 @@ class MediaDownloader:
                     vtt_url = self._find_vtt_url(auto_subs[lang])
                     if vtt_url:
                         is_translation = 'tlang=' in vtt_url
-                        print(f"DEBUG: Trying automatic {lang}: {vtt_url[:100]}...")
                         vtt_content = self._fetch_vtt_content(vtt_url, video_id)
                         if vtt_content:
                             return {
@@ -568,86 +563,6 @@ class MediaDownloader:
                 return None
         
         return None
-
-    def extract_text_from_vtt(self, vtt_content: str) -> str | None:
-        """
-        Extract pure text from VTT content, removing timestamps, tags, and metadata.
-        Handles YouTube's specific VTT format with inline word-level timestamps.
-        
-        :param vtt_content: VTT format subtitle content
-        :return: Plain text transcript, or None if input is not valid VTT
-        """
-        
-        # Quick validation: Check if it's actually VTT format
-        if not vtt_content or not isinstance(vtt_content, str):
-            print("ERROR: Invalid input - content is empty or not a string")
-            return None
-        
-        content_check = vtt_content.strip()
-        
-        # Simple check: Must start with WEBVTT and contain timestamps
-        if not content_check.upper().startswith('WEBVTT'):
-            print("ERROR: Content does not start with WEBVTT header")
-            print(f"First 100 chars: {content_check[:100]}")
-            return None
-        
-        # Extract text
-        # PROBLEM: Youtube VTTs format has overlapping capitions in order to
-        # create a "scrolling" effect. We need to avoid duplicates.
-        lines = vtt_content.split('\n')
-        text_parts = []
-        seen_lines = set()  # Track lines we've already added
-        
-        for line in lines:
-            line = line.strip()
-            
-            # Skip empty lines
-            if not line:
-                continue
-            
-            # Skip WEBVTT header and metadata lines
-            if (line.upper().startswith('WEBVTT') or 
-                line.startswith('Kind:') or 
-                line.startswith('Language:') or
-                line.upper().startswith('NOTE')):
-                continue
-            
-            # Skip timestamp lines (contain --> with optional alignment/position settings)
-            if '-->' in line:
-                continue
-            
-            # Skip sound descriptions like [Music], [Applause], etc.
-            if re.match(r'^\[.*\]$', line):
-                continue
-            
-            # Now process the caption text line
-            # Remove inline word-level timestamps: <00:00:02.320>
-            line = re.sub(r'<\d{2}:\d{2}:\d{2}\.\d{3}>', '', line)
-            
-            # Remove <c> tags (color/styling tags wrapping words)
-            line = re.sub(r'</?c[^>]*>', '', line)
-            
-            # Remove any other tags (like <i>, <b>, <u>)
-            line = re.sub(r'<[^>]+>', '', line)
-            
-            # Clean up extra whitespace
-            line = ' '.join(line.split())
-            
-            # Skip if we've already seen this exact text
-            if line and line not in seen_lines:
-                text_parts.append(line)
-                seen_lines.add(line)
-        
-        if not text_parts:
-            print("WARNING: No text content extracted from VTT")
-            return ""
-        
-        # Join with spaces and clean up any double spaces
-        result = ' '.join(text_parts)
-        result = ' '.join(result.split())  # Normalize whitespace
-        
-        return result
-
         
     # TODO: Implement method to get the list of online available video for a channel
 
