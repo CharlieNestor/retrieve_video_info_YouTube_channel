@@ -64,26 +64,27 @@ class SQLiteStorage:
         cursor = self.conn.cursor()
         cursor.executescript("""
         -- Entity types table
-        CREATE TABLE entity_types (
+        CREATE TABLE IF NOT EXISTS entity_types (
             id INTEGER PRIMARY KEY,
             name TEXT UNIQUE -- 'channel', 'video', 'playlist'
         );
         
         -- Channels table
-        CREATE TABLE channels (
+        CREATE TABLE IF NOT EXISTS channels (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT,
             subscriber_count INTEGER,
             video_count INTEGER,
             thumbnail_url TEXT,
+            banner_url TEXT,
             content_breakdown TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         -- Videos table
-        CREATE TABLE videos (
+        CREATE TABLE IF NOT EXISTS videos (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT,
@@ -106,7 +107,7 @@ class SQLiteStorage:
         );
 
         -- Playlists table
-        CREATE TABLE playlists (
+        CREATE TABLE IF NOT EXISTS playlists (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT,
@@ -118,7 +119,7 @@ class SQLiteStorage:
         );
                              
         -- Playlist-video relations
-        CREATE TABLE playlist_videos (
+        CREATE TABLE IF NOT EXISTS playlist_videos (
             playlist_id TEXT,
             video_id TEXT,
             position INTEGER, -- Optional: track position in playlist
@@ -128,13 +129,13 @@ class SQLiteStorage:
         );
 
         -- Tags table
-        CREATE TABLE tags (
+        CREATE TABLE IF NOT EXISTS tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE
         );
         
         -- Video-Tag relations
-        CREATE TABLE video_tags (
+        CREATE TABLE IF NOT EXISTS video_tags (
             video_id TEXT,
             tag_id INTEGER,
             PRIMARY KEY (video_id, tag_id),
@@ -143,11 +144,26 @@ class SQLiteStorage:
         );
         
         -- Timestamps table
-        CREATE TABLE timestamps (
+        CREATE TABLE IF NOT EXISTS timestamps (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             video_id TEXT,
             time_seconds INTEGER,
             description TEXT,
+            FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+        );
+
+        -- Transcripts (raw VTT + derived plain text)
+        CREATE TABLE IF NOT EXISTS transcripts (
+            video_id TEXT NOT NULL,
+            lang TEXT NOT NULL,
+            source TEXT,
+            is_translation INTEGER DEFAULT 0,
+            vtt TEXT,
+            plain_text TEXT,
+            vtt_hash TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (video_id, lang, is_translation),
             FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
         );
 
@@ -163,7 +179,7 @@ class SQLiteStorage:
         """
         cursor = self.conn.cursor()
         required_tables = ['entity_types', 'channels', 'videos', 'playlists', 
-                        'playlist_videos', 'tags', 'video_tags', 'timestamps']
+                        'playlist_videos', 'tags', 'video_tags', 'timestamps', 'transcripts']
         
         for table in required_tables:
             cursor.execute(
@@ -404,6 +420,7 @@ class SQLiteStorage:
             if row:
                 video_data = dict(row)
                 video_data['tags'] = self.get_tags_video(video_id)
+                video_data['timestamps'] = self.get_video_timestamps(video_id)
                 return video_data
             return None # Convert Row to dict if found
     
@@ -883,6 +900,62 @@ class SQLiteStorage:
             except sqlite3.Error as e:
                 print(f"Database error getting timestamps for video {video_id}: {e}")
                 return []
+
+
+    ###### TRANSCRIPT OPERATIONS #####
+
+    def save_transcript(self, video_id: str, vtt: str, plain_text: str, lang: str,
+                        source: str = None, is_translation: bool = False, vtt_hash: str = None) -> bool:
+        with self.lock:
+            cur = self.conn.cursor()
+            cur.execute("""
+                INSERT INTO transcripts (video_id, lang, source, is_translation, vtt, plain_text, vtt_hash, created_at, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(video_id, lang, is_translation) DO UPDATE SET
+                    source = excluded.source,
+                    vtt = excluded.vtt,
+                    plain_text = excluded.plain_text,
+                    vtt_hash = excluded.vtt_hash,
+                    last_updated = CURRENT_TIMESTAMP
+            """, (video_id, lang or 'unknown', source, 1 if is_translation else 0, vtt, plain_text, vtt_hash))
+            self.conn.commit()
+            return True
+
+    def get_transcript(self, video_id: str, lang: str = None) -> Union[Dict[str, Any], None]:
+        with self.lock:
+            cur = self.conn.cursor()
+            if lang:
+                cur.execute("""
+                    SELECT video_id, lang, source, is_translation, vtt, plain_text, vtt_hash, created_at, last_updated
+                    FROM transcripts
+                    WHERE video_id = ? AND lang = ?
+                    ORDER BY is_translation ASC
+                    LIMIT 1
+                """, (video_id, lang))
+            else:
+                # Prefer non-translation over translations
+                cur.execute("""
+                    SELECT video_id, lang, source, is_translation, vtt, plain_text, vtt_hash, created_at, last_updated
+                    FROM transcripts
+                    WHERE video_id = ?
+                    ORDER BY is_translation ASC
+                    LIMIT 1
+                """, (video_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def delete_transcript(self, video_id: str, lang: str = None, is_translation: bool = None) -> int:
+        with self.lock:
+            cur = self.conn.cursor()
+            if lang is None and is_translation is None:
+                cur.execute("DELETE FROM transcripts WHERE video_id = ?", (video_id,))
+            elif lang is not None and is_translation is None:
+                cur.execute("DELETE FROM transcripts WHERE video_id = ? AND lang = ?", (video_id, lang))
+            else:
+                cur.execute("DELETE FROM transcripts WHERE video_id = ? AND lang = ? AND is_translation = ?",
+                            (video_id, lang, 1 if is_translation else 0))
+            self.conn.commit()
+            return cur.rowcount
         
 
     ##### PLAYLIST OPERATIONS #####

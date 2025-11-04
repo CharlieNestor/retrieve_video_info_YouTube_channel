@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Spinner, Alert, Row, Col, Badge, Button } from 'react-bootstrap';
+import { Card, Spinner, Alert, Row, Col, Badge, Button, Table } from 'react-bootstrap';
 import ExpandableText from '../ExpandableText'; // Assuming ExpandableText is in the parent directory
 
 // --- Helper Functions ---
@@ -31,6 +31,18 @@ const formatDate = (dateString) => {
   } catch (e) {
     return dateString;
   }
+};
+
+// --- Detail View for a Single Video ---
+
+const formatTime = (seconds) => {
+  if (seconds === null || seconds === undefined) return 'N/A';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.round(seconds % 60);
+  const mStr = m.toString().padStart(2, '0');
+  const sStr = s.toString().padStart(2, '0');
+  return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
 };
 
 // --- Detail View for a Single Video ---
@@ -151,6 +163,28 @@ function VideoDetailView({ videoId, onBack }) {
                 <strong>Description:</strong>
                 <ExpandableText text={details.description} maxLength={250} />
             </div>
+        )}
+
+        {details.timestamps && details.timestamps.length > 0 && (
+          <div className="mt-3 mb-5">
+            <strong>Chapters:</strong>
+            <Table striped bordered hover size="sm" className="mt-2">
+              <thead>
+                <tr>
+                  <th style={{ width: '100px' }}>Start Time</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                {details.timestamps.map((ts, index) => (
+                  <tr key={index}>
+                    <td style={{ width: '100px' }}>{formatTime(ts.time_seconds)}</td>
+                    <td>{ts.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
         )}
 
       </Card.Body>

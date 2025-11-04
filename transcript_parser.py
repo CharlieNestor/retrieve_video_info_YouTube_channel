@@ -1,6 +1,6 @@
 import re
 from storage import SQLiteStorage
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Any
 
 class TranscriptParser:
     """
@@ -10,12 +10,11 @@ class TranscriptParser:
     and provides methods to extract and manipulate the transcript data.
     """
 
-    def __init__(self, vtt_content: str, storage: SQLiteStorage):
+    def __init__(self, vtt_content: str):
         """
         Initializes the TranscriptParser with the VTT file content.
 
         :param vtt_content: The full string content of the VTT file.
-        :param storage: An instance of SQLiteStorage to access video and chapter data.
         :raises ValueError: If the content is empty or does not appear to be a valid VTT format.
         """
         if not vtt_content or not isinstance(vtt_content, str):
@@ -26,7 +25,6 @@ class TranscriptParser:
             raise ValueError("Content does not appear to be a valid VTT file (must start with 'WEBVTT').")
 
         self.content = vtt_content
-        self.storage = storage
 
     def get_plain_text(self) -> str:
         """
@@ -166,23 +164,17 @@ class TranscriptParser:
 
         return processed_cues
 
-    def segment_by_chapters(self, video_id: str) -> List[Dict[str, Union[int, str]]]:
+    def segment_by_chapters(self, chapters: List[Dict[str, Any]], video_duration: int) -> List[Dict[str, Union[int, str]]]:
         """
         Segments the transcript by video chapters (timestamps).
         If the video has no chapters, it will be artificially split into 10 parts.
         This method is robust to both real chapters from the database and a fallback scenario.
 
-        :param video_id: The ID of the video to process.
+        :param chapters: A list of dictionaries, each with 'time_seconds' and 'description'.
+        :param video_duration: The total duration of the video in seconds.
         :return: A list of dictionaries, each representing a chapter with its title, 
                  start time, and the corresponding transcript text.
         """
-        video_info = self.storage.get_video(video_id)
-        if not video_info:
-            raise ValueError(f"Video with ID '{video_id}' not found in the database.")
-
-        chapters = self.storage.get_video_timestamps(video_id)
-        video_duration = video_info.get('duration', 0)
-
         # Ensure consistent data structure for chapters, whether real or fallback.
         # The consistent keys will now be 'description' and 'time_seconds' to match DB.
         if not chapters:

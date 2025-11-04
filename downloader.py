@@ -365,7 +365,7 @@ class MediaDownloader:
             print(f"Error fetching playlist info: {str(e)}")
             raise
 
-    def get_video_transcript(self, video_id: str, languages: List[str] = None) -> Dict[str, Any] | None:
+    def get_raw_video_transcript(self, video_id: str, languages: List[str] = None) -> Dict[str, Any] | None:
         """
         Retrieves the best available transcript for a video with smart language detection.
 

@@ -1,8 +1,11 @@
 import os
+import hashlib
 from datetime import datetime, timedelta
 from storage import SQLiteStorage
 from downloader import MediaDownloader
 from channel_manager import ChannelManager
+from transcript_parser import TranscriptParser
+from typing import Union
 
 
 class VideoManager:
@@ -98,6 +101,34 @@ class VideoManager:
                 print(f"Updating video {video_id}...")
                 return self.update_video(video_id)
 
+            # If video exists and is up-to-date, check if transcript is missing
+            if not self.storage.get_transcript(video_id):
+                print(f"Video {video_id} is up-to-date, but transcript is missing. Fetching transcript...")
+                try:
+                    tr = self.downloader.get_raw_video_transcript(video_id)
+                    if tr and tr.get('vtt'):
+                        vtt = tr['vtt']
+                        lang = tr.get('lang') or 'unknown'
+                        source = tr.get('source')
+                        is_translation = bool(tr.get('is_translation'))
+                        # Normalize for a stable hash
+                        normalized_vtt = '\n'.join(line.strip() for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n'))
+                        vtt_hash = hashlib.sha256(normalized_vtt.encode('utf-8')).hexdigest()
+
+                        plain_text = TranscriptParser(vtt).get_plain_text()
+                        self.storage.save_transcript(
+                            video_id=video_id,
+                            vtt=vtt,
+                            plain_text=plain_text,
+                            lang=lang,
+                            source=source,
+                            is_translation=is_translation,
+                            vtt_hash=vtt_hash
+                        )
+                        print(f"Successfully backfilled transcript for video {video_id}.")
+                except Exception as e:
+                    print(f"Warning: failed to backfill transcript for {video_id}: {e}")
+
             print(f"Video {video_id} exists. Returning cached data.")
             return existing_video
 
@@ -124,6 +155,31 @@ class VideoManager:
         # --- Fetch and Save Timestamps ---
         video_timestamps = self.downloader.get_video_timestamps(video_id)
         self.storage.save_video_timestamps(video_id, video_timestamps)
+
+        # --- Fetch and Save Transcript (VTT + plain text) ---
+        try:
+            tr = self.downloader.get_raw_video_transcript(video_id)
+            if tr and tr.get('vtt'):
+                vtt = tr['vtt']
+                lang = tr.get('lang') or 'unknown'
+                source = tr.get('source')
+                is_translation = bool(tr.get('is_translation'))
+                # Normalize for a stable hash
+                normalized_vtt = '\n'.join(line.rstrip() for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n'))
+                vtt_hash = hashlib.sha256(normalized_vtt.encode('utf-8')).hexdigest()
+
+                plain_text = TranscriptParser(vtt).get_plain_text()
+                self.storage.save_transcript(
+                    video_id=video_id,
+                    vtt=vtt,
+                    plain_text=plain_text,
+                    lang=lang,
+                    source=source,
+                    is_translation=is_translation,
+                    vtt_hash=vtt_hash
+                )
+        except Exception as e:
+            print(f"Warning: failed to fetch/save transcript for {video_id}: {e}")
 
         print(f"Successfully fetched and saved video {video_id} and its associations.")
         return video_info
@@ -166,6 +222,31 @@ class VideoManager:
             video_timestamps = self.downloader.get_video_timestamps(video_id)
             self.storage.save_video_timestamps(video_id, video_timestamps)
 
+            # --- Fetch and Save Transcript (VTT + plain text) ---
+            try:
+                tr = self.downloader.get_raw_video_transcript(video_id)
+                if tr and tr.get('vtt'):
+                    vtt = tr['vtt']
+                    lang = tr.get('lang') or 'unknown'
+                    source = tr.get('source')
+                    is_translation = bool(tr.get('is_translation'))
+                    # Normalize for a stable hash
+                    normalized_vtt = '\n'.join(line.rstrip() for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n'))
+                    vtt_hash = hashlib.sha256(normalized_vtt.encode('utf-8')).hexdigest()
+
+                    plain_text = TranscriptParser(vtt).get_plain_text()
+                    self.storage.save_transcript(
+                        video_id=video_id,
+                        vtt=vtt,
+                        plain_text=plain_text,
+                        lang=lang,
+                        source=source,
+                        is_translation=is_translation,
+                        vtt_hash=vtt_hash
+                    )
+            except Exception as e:
+                print(f"Warning: failed to fetch/save transcript for {video_id}: {e}")
+
             print(f"Successfully updated video {video_id} in database.")
             return video_info
 
@@ -173,6 +254,21 @@ class VideoManager:
             print(f"Error updating video {video_id}: {str(e)}")
             self.storage._update_video_status(video_id, 'update_error')
             return None
+
+    def get_transcript_plain(self, video_id: str, lang: str = None) -> Union[str, None]:
+        tr = self.storage.get_transcript(video_id, lang)
+        return tr.get('plain_text') if tr else None
+
+    def get_transcript_by_chapters(self, video_id: str, lang: str = None) -> list:
+        # Compute on read (don’t store segments)
+        tr = self.storage.get_transcript(video_id, lang)
+        if not tr or not tr.get('vtt'):
+            return []
+        timestamps = self.storage.get_video_timestamps(video_id) or []
+        # duration is optional here; pass 0 if unknown
+        video = self.storage.get_video(video_id) or {}
+        duration = int(video.get('duration') or 0)
+        return TranscriptParser(tr['vtt']).segment_by_chapters(timestamps, duration)
         
     def get_video(self, video_id: str) -> dict:
         """
