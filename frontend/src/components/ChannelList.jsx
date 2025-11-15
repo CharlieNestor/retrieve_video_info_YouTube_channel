@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Spinner, Alert, Row, Col, Button, ListGroup } from 'react-bootstrap';
-
-// Helper to create the proxy URL
-const getProxyUrl = (url) => {
-  if (!url) return '';
-  return `http://127.0.0.1:8000/api/image-proxy?url=${encodeURIComponent(url)}`;
-};
+import { Card, Spinner, Alert, Row, Col, Button } from 'react-bootstrap';
+import VideoDetailView from './VideoDetailView';
+import { getProxyUrl, formatDate } from '../utils';
 
 // --- Detail View for a Single Channel ---
 function ChannelDetailView({ channelId, onBack }) {
@@ -13,26 +9,37 @@ function ChannelDetailView({ channelId, onBack }) {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedVideoId, setSelectedVideoId] = useState(null); // State for video navigation
 
   useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      fetch(`http://127.0.0.1:8000/api/channels/${channelId}`),
-      fetch(`http://127.0.0.1:8000/api/channels/${channelId}/videos`)
-    ])
-    .then(async ([resDetails, resVideos]) => {
-      if (!resDetails.ok) throw new Error(`Failed to fetch channel details.`);
-      if (!resVideos.ok) throw new Error(`Failed to fetch channel videos.`);
-      
-      const detailsData = await resDetails.json();
-      const videosData = await resVideos.json();
+    // Only fetch channel data if we are not viewing a video
+    if (!selectedVideoId) {
+      setLoading(true);
+      Promise.all([
+        fetch(`http://127.0.0.1:8000/api/channels/${channelId}`),
+        fetch(`http://127.0.0.1:8000/api/channels/${channelId}/videos`)
+      ])
+      .then(async ([resDetails, resVideos]) => {
+        if (!resDetails.ok) throw new Error(`Failed to fetch channel details.`);
+        if (!resVideos.ok) throw new Error(`Failed to fetch channel videos.`);
+        
+        const detailsData = await resDetails.json();
+        const videosData = await resVideos.json();
 
-      setDetails(detailsData);
-      setVideos(videosData);
-    })
-    .catch(err => setError(err.message))
-    .finally(() => setLoading(false));
-  }, [channelId]);
+        setDetails(detailsData);
+        setVideos(videosData);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+    }
+  }, [channelId, selectedVideoId]); // Re-fetch if we come back from a video
+
+  // --- Render Logic ---
+
+  // If a video is selected, show the video detail view
+  if (selectedVideoId) {
+    return <VideoDetailView videoId={selectedVideoId} onBack={() => setSelectedVideoId(null)} />;
+  }
 
   if (loading) {
     return <div className="text-center"><Spinner animation="border" /></div>;
@@ -45,19 +52,6 @@ function ChannelDetailView({ channelId, onBack }) {
   if (!details) {
     return <Alert variant="warning">Channel data could not be loaded.</Alert>;
   }
-
-  const formatVideoDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch (e) {
-      return dateString; // Fallback to original string if parsing fails
-    }
-  };
 
   return (
     <Card className="channel-detail-card">
@@ -108,9 +102,13 @@ function ChannelDetailView({ channelId, onBack }) {
 
             {/* Video Rows */}
             {videos.map(video => (
-              <Row key={video.id} className="py-2 border-bottom align-items-center">
+              <Row 
+                key={video.id} 
+                className="py-2 border-bottom align-items-center is-clickable"
+                onClick={() => setSelectedVideoId(video.id)}
+              >
                 <Col>{video.title}</Col>
-                <Col md="auto">{formatVideoDate(video.published_at)}</Col>
+                <Col md="auto">{formatDate(video.published_at)}</Col>
                 <Col md="auto" className="text-center" style={{ minWidth: '120px' }}>
                   {video.file_path &&
                     <span title="Downloaded" style={{ fontSize: '1.2rem', color: '#28a745' }}>✓</span>
