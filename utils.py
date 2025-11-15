@@ -1,4 +1,5 @@
 import re
+import hashlib
 from datetime import datetime
 from typing import Union, Optional
 
@@ -59,6 +60,62 @@ def normalize_title_for_comparison(title: str) -> str:
             normalized = normalized[:-len(word)-1]
     
     return normalized.strip()
+
+
+def normalize_vtt_for_hash(vtt: str) -> str:
+    """
+    Normalizes VTT (WebVTT) content for consistent hashing.
+    
+    This function ensures that the same transcript content always produces
+    the same hash, regardless of platform-specific line endings or trailing
+    whitespace variations.
+    
+    Normalization steps:
+    1. Converts all line endings (\r\n, \r) to \n
+    2. Removes trailing whitespace from each line (preserves leading whitespace)
+    3. Joins lines with consistent \n separator
+    
+    Leading whitespace is preserved as it may be significant for VTT formatting,
+    but trailing whitespace is removed as it's never meaningful and varies by editor.
+    
+    :param vtt: Raw VTT content string
+    :return: Normalized VTT string suitable for hashing
+    
+    Example:
+        >>> vtt = "WEBVTT\r\n\r\n00:00:00.000 --> 00:00:05.000  \nHello world  \n"
+        >>> normalized = normalize_vtt_for_hash(vtt)
+        >>> # Produces consistent output regardless of input line endings
+    """
+    if not vtt:
+        return ""
+    
+    # Normalize line endings and remove trailing whitespace from each line
+    return '\n'.join(
+        line.rstrip() 
+        for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    )
+
+
+def compute_vtt_hash(vtt: str) -> str:
+    """
+    Computes a SHA-256 hash of normalized VTT content.
+    
+    This function provides a consistent way to detect changes in transcript content
+    across the application. The same transcript will always produce the same hash,
+    even if it comes from different sources or has minor formatting differences.
+    
+    :param vtt: Raw VTT content string
+    :return: Hexadecimal SHA-256 hash string (64 characters)
+    
+    Example:
+        >>> vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nHello\n"
+        >>> hash_value = compute_vtt_hash(vtt)
+        >>> len(hash_value)
+        64
+    """
+    normalized = normalize_vtt_for_hash(vtt)
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
 
 def format_datetime(upload_date: Optional[str] = None, 
                     timestamp: Optional[int] = None,

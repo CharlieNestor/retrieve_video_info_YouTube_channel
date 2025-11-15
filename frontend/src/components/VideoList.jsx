@@ -45,13 +45,51 @@ const formatTime = (seconds) => {
   return h > 0 ? `${h}:${mStr}:${sStr}` : `${mStr}:${sStr}`;
 };
 
+const ExpandableCell = ({ text }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const toggleExpanded = () => {
+    setIsExpanded(!isExpanded);
+  };
+
+  const textStyle = {
+    whiteSpace: isExpanded ? 'normal' : 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    minWidth: 0, // Prevents flex item from overflowing
+  };
+
+  const containerStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  };
+
+  return (
+    <td>
+      <div style={isExpanded ? {} : containerStyle}>
+        <div style={textStyle}>{text}</div>
+        <Button variant="link" size="sm" onClick={toggleExpanded} style={{ padding: '0', lineHeight: '1', marginLeft: '8px', flexShrink: 0 }}>
+          {isExpanded ? 'Less' : 'More'}
+        </Button>
+      </div>
+    </td>
+  );
+};
+
 // --- Detail View for a Single Video ---
 
 function VideoDetailView({ videoId, onBack }) {
   const [details, setDetails] = useState(null);
+  const [transcriptPlainText, setTranscriptPlainText] = useState(null);
+  const [transcriptChapters, setTranscriptChapters] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [transcriptLoading, setTranscriptLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [transcriptError, setTranscriptError] = useState(null);
   const [copyButtonText, setCopyButtonText] = useState('Copy Path');
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState({ message: '', type: '' });
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -62,8 +100,9 @@ function VideoDetailView({ videoId, onBack }) {
     });
   };
 
-  useEffect(() => {
+  const fetchVideoDetails = () => {
     setLoading(true);
+    setError(null);
     fetch(`http://127.0.0.1:8000/api/videos/${videoId}`)
       .then(response => {
         if (!response.ok) {
@@ -71,12 +110,66 @@ function VideoDetailView({ videoId, onBack }) {
         }
         return response.json();
       })
-      .then(data => {
-        setDetails(data);
-      })
+      .then(data => setDetails(data))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
+  };
+
+  const fetchTranscript = () => {
+    setTranscriptLoading(true);
+    setTranscriptError(null);
+    setTranscriptPlainText(null);
+    setTranscriptChapters([]);
+    fetch(`http://127.0.0.1:8000/api/videos/${videoId}/transcript`)
+      .then(response => {
+        if (!response.ok) {
+          if (response.status === 404) return null;
+          return response.json().then(err => { throw new Error(err.detail || 'Failed to fetch transcript.'); });
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data) {
+          setTranscriptPlainText(data.plain_text);
+          setTranscriptChapters(data.chapters || []);
+        }
+      })
+      .catch(err => setTranscriptError(err.message))
+      .finally(() => setTranscriptLoading(false));
+  };
+
+  useEffect(() => {
+    fetchVideoDetails();
+    fetchTranscript();
   }, [videoId]);
+
+  const handleUpdate = () => {
+    setIsUpdating(true);
+    setUpdateStatus({ message: '', type: '' });
+
+    fetch(`http://127.0.0.1:8000/api/videos/${videoId}/update`, {
+      method: 'POST',
+    })
+    .then(response => {
+      if (!response.ok) {
+        return response.json().then(err => { throw new Error(err.detail || 'Update failed'); });
+      }
+      return response.json();
+    })
+    .then(data => {
+      setUpdateStatus({ message: data.message || 'Video updated successfully!', type: 'success' });
+      // Re-fetch data to show the latest info
+      fetchVideoDetails();
+      fetchTranscript();
+    })
+    .catch(error => {
+      setUpdateStatus({ message: error.message, type: 'danger' });
+    })
+    .finally(() => {
+      setIsUpdating(false);
+      setTimeout(() => setUpdateStatus({ message: '', type: '' }), 5000);
+    });
+  };
 
   if (loading) {
     return <div className="text-center"><Spinner animation="border" /></div>;
@@ -93,9 +186,24 @@ function VideoDetailView({ videoId, onBack }) {
   return (
     <Card className="channel-detail-card"> {/* Reusing similar styling */}
       <Card.Body className="pb-5">
-        <Button variant="outline-secondary" onClick={onBack} className="back-button mb-4">
-          &larr; Back to Video List
-        </Button>
+        <div className="d-flex justify-content-between align-items-center mb-4">
+          <Button variant="outline-secondary" onClick={onBack}>
+            &larr; Back to Video List
+          </Button>
+          <Button variant="primary" onClick={handleUpdate} disabled={isUpdating}>
+            {isUpdating ? (
+              <><Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> Updating...</>
+            ) : (
+              'Update'
+            )}
+          </Button>
+        </div>
+
+        {updateStatus.message && (
+          <Alert variant={updateStatus.type} className="mb-4">
+            {updateStatus.message}
+          </Alert>
+        )}
 
         <Card.Title as="h2" className="mb-1">{details.title}</Card.Title>
         <Card.Subtitle className="mb-3 text-muted">By {details.channel_title}</Card.Subtitle>
@@ -165,25 +273,38 @@ function VideoDetailView({ videoId, onBack }) {
             </div>
         )}
 
-        {details.timestamps && details.timestamps.length > 0 && (
+        {transcriptChapters && transcriptChapters.length > 0 && (
           <div className="mt-3 mb-5">
             <strong>Chapters:</strong>
-            <Table striped bordered hover size="sm" className="mt-2">
+            <Table striped bordered hover size="sm" className="mt-2" style={{ tableLayout: 'fixed' }}>
               <thead>
                 <tr>
-                  <th style={{ width: '100px' }}>Start Time</th>
-                  <th>Description</th>
+                  <th style={{ width: '12%' }}>Start Time</th>
+                  <th style={{ width: '38%' }}>Title</th>
+                  <th style={{ width: '50%' }}>Text</th>
                 </tr>
               </thead>
               <tbody>
-                {details.timestamps.map((ts, index) => (
+                {transcriptChapters.map((ts, index) => (
                   <tr key={index}>
-                    <td style={{ width: '100px' }}>{formatTime(ts.time_seconds)}</td>
-                    <td>{ts.description}</td>
+                    <td>{formatTime(ts.start_time)}</td>
+                    <td>{ts.chapter_title}</td>
+                    <ExpandableCell text={ts.text} />
                   </tr>
                 ))}
               </tbody>
             </Table>
+          </div>
+        )}
+
+        {transcriptLoading ? (
+          <div className="text-center mt-3 mb-5"><Spinner animation="border" size="sm" /> Loading transcript...</div>
+        ) : transcriptError ? (
+          <Alert variant="danger" className="mt-3 mb-5">Error loading transcript: {transcriptError}</Alert>
+        ) : transcriptPlainText && (
+          <div className="mt-3 mb-5">
+            <strong>Full Plain Transcript:</strong><br />
+            <ExpandableText text={transcriptPlainText} maxLength={500} />
           </div>
         )}
 

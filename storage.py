@@ -592,6 +592,24 @@ class SQLiteStorage:
                 self.conn.rollback()
                 raise
         
+    def touch_video_timestamp(self, video_id: str) -> bool:
+        """
+        Updates only the last_updated timestamp for a video to the current time.
+        Used to prevent frequent re-checking of a video that is already up-to-date.
+        """
+        with self.lock:
+            try:
+                if not self._video_exists(video_id):
+                    return False
+                cursor = self.conn.cursor()
+                cursor.execute("UPDATE videos SET last_updated = CURRENT_TIMESTAMP WHERE id = ?", (video_id,))
+                self.conn.commit()
+                return cursor.rowcount > 0
+            except Exception as e:
+                print(f"Database error in touch_video_timestamp: {e}.")
+                self.conn.rollback()
+                raise
+        
         
     def delete_video(self, video_id: str):
         """
@@ -603,7 +621,7 @@ class SQLiteStorage:
             try:
                 # Check if the video exists first
                 if not self._video_exists(video_id):
-                    raise ValueError("WARNING: Video ID {video_id} does not exist in the database.")
+                    raise ValueError(f"WARNING: Video ID {video_id} does not exist in the database.")
                 
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM videos WHERE id = ?", (video_id,))
@@ -613,6 +631,105 @@ class SQLiteStorage:
                 self.conn.rollback()
                 raise
 
+    def save_video_update_transactional(self, video_id: str, video_info: dict = None, tags: List[str] = None, timestamps: List[Dict[str, Any]] = None, transcript_data: Dict[str, Any] = None):
+        """
+        Performs a full, transactional update for a video's metadata.
+        This includes core info, tags, timestamps, and transcript.
+        If any step fails, the entire transaction is rolled back.
+        """
+        # --- Pre-transaction validation ---
+        if video_info and video_id != video_info.get('id'):
+            raise ValueError(f"Mismatched video IDs: parameter '{video_id}' vs. data '{video_info.get('id')}'")
+
+        with self.lock:
+            cursor = self.conn.cursor()
+            try:
+                # Use BEGIN IMMEDIATE to acquire write lock early and prevent races
+                cursor.execute("BEGIN IMMEDIATE")
+
+                # --- 1. Save Video Info ---
+                if video_info: # Only update if video_info is provided
+                    thumbnail_url = video_info.get('thumbnail_url')
+                    if isinstance(thumbnail_url, dict) and 'url' in thumbnail_url:
+                        thumbnail_url = thumbnail_url['url']
+                    
+                    sql_video = """
+                        UPDATE videos SET
+                            title = ?, description = ?, channel_title = ?,
+                            published_at = ?, duration = ?, view_count = ?, like_count = ?,
+                            thumbnail_url = ?, is_short = ?, is_live = ?, status = ?,
+                            last_updated = CURRENT_TIMESTAMP -- Update timestamp here if video_info changes
+                        WHERE id = ?
+                    """
+                    params_video = (
+                        video_info['title'], video_info.get('description'), video_info.get('channel_title'),
+                        video_info.get('published_at'), video_info.get('duration'), video_info.get('view_count'),
+                        video_info.get('like_count'), thumbnail_url, video_info.get('is_short', False),
+                        video_info.get('is_live', False), video_info.get('status', 'available'), video_id
+                    )
+                    cursor.execute(sql_video, params_video)
+
+                    # Fail fast if the video ID didn't exist and no rows were updated
+                    if cursor.rowcount == 0:
+                        raise ValueError(f"Video with ID '{video_id}' not found in database. Update failed.")
+                
+                # --- 2. Save Tags (delete and re-insert) ---
+                if tags is not None: # Only update if tags are explicitly provided (can be empty list)
+                    cursor.execute("DELETE FROM video_tags WHERE video_id = ?", (video_id,))
+                    if tags: # Proceed only if there are tags to add
+                        for tag_name in tags:
+                            normalized_tag = tag_name.lower().strip()
+                            if not normalized_tag: continue
+                            cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (normalized_tag,))
+                            cursor.execute("SELECT id FROM tags WHERE name = ?", (normalized_tag,))
+                            tag_row = cursor.fetchone()
+                            if tag_row:
+                                cursor.execute("INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?, ?)", (video_id, tag_row['id']))
+
+                # --- 3. Save Timestamps (delete and re-insert) ---
+                if timestamps is not None: # Only update if timestamps are explicitly provided (can be empty list)
+                    cursor.execute("DELETE FROM timestamps WHERE video_id = ?", (video_id,))
+                    if timestamps: # Proceed only if there are timestamps to add
+                        data_to_insert = [
+                            (video_id, ts['start_time'], ts['title'])
+                            for ts in timestamps if 'start_time' in ts and 'title' in ts
+                        ]
+                        if data_to_insert:
+                            cursor.executemany("INSERT INTO timestamps (video_id, time_seconds, description) VALUES (?, ?, ?)", data_to_insert)
+
+                # --- 4. Save Transcript (UPSERT) ---
+                if transcript_data: # Only update if transcript_data is provided
+                    sql_transcript = """
+                        INSERT INTO transcripts (video_id, lang, source, is_translation, vtt, plain_text, vtt_hash, created_at, last_updated)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        ON CONFLICT(video_id, lang, is_translation) DO UPDATE SET
+                            source = excluded.source, vtt = excluded.vtt, plain_text = excluded.plain_text,
+                            vtt_hash = excluded.vtt_hash, last_updated = CURRENT_TIMESTAMP
+                    """
+                    params_transcript = (
+                        video_id, transcript_data.get('lang', 'unknown'), transcript_data.get('source'),
+                        1 if transcript_data.get('is_translation') else 0, transcript_data.get('vtt'),
+                        transcript_data.get('plain_text'), transcript_data.get('vtt_hash')
+                    )
+                    cursor.execute(sql_transcript, params_transcript)
+
+                # Always update the last_updated timestamp if any part of the transaction was processed
+                # This ensures the video's last_updated field is refreshed if any data was potentially changed.
+                # This is done at the end to ensure it's part of the transaction.
+                # If video_info was updated, its last_updated was already set. This will just re-set it.
+                # If only other parts were updated, this ensures last_updated is refreshed.
+                cursor.execute("UPDATE videos SET last_updated = CURRENT_TIMESTAMP WHERE id = ?", (video_id,))
+
+                self.conn.commit()
+                return True
+            except Exception as e:
+                self.conn.rollback()
+                # Log the specific error type for better debugging
+                if isinstance(e, ValueError):
+                    print(f"Validation error in transaction for video {video_id}: {e}")
+                else:
+                    print(f"Database error in save_video_update_transactional for video {video_id}: {e}. Transaction rolled back.")
+                raise
 
     ###### TAGS OPERATIONS #####
 

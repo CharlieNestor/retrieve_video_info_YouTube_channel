@@ -1,10 +1,10 @@
 import os
-import hashlib
 from datetime import datetime, timedelta
 from storage import SQLiteStorage
 from downloader import MediaDownloader
 from channel_manager import ChannelManager
 from transcript_parser import TranscriptParser
+from utils import compute_vtt_hash
 from typing import Union
 
 
@@ -111,9 +111,8 @@ class VideoManager:
                         lang = tr.get('lang') or 'unknown'
                         source = tr.get('source')
                         is_translation = bool(tr.get('is_translation'))
-                        # Normalize for a stable hash
-                        normalized_vtt = '\n'.join(line.strip() for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n'))
-                        vtt_hash = hashlib.sha256(normalized_vtt.encode('utf-8')).hexdigest()
+                        # Compute hash using centralized utility for consistency
+                        vtt_hash = compute_vtt_hash(vtt)
 
                         plain_text = TranscriptParser(vtt).get_plain_text()
                         self.storage.save_transcript(
@@ -164,9 +163,8 @@ class VideoManager:
                 lang = tr.get('lang') or 'unknown'
                 source = tr.get('source')
                 is_translation = bool(tr.get('is_translation'))
-                # Normalize for a stable hash
-                normalized_vtt = '\n'.join(line.rstrip() for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n'))
-                vtt_hash = hashlib.sha256(normalized_vtt.encode('utf-8')).hexdigest()
+                # Compute hash using centralized utility for consistency
+                vtt_hash = compute_vtt_hash(vtt)
 
                 plain_text = TranscriptParser(vtt).get_plain_text()
                 self.storage.save_transcript(
@@ -186,73 +184,116 @@ class VideoManager:
         
     def update_video(self, video_id: str) -> dict:
         """
-        Fetches fresh video information and updates the database.
+        Fetches fresh video data, compares it with existing data, and performs
+        an update only if changes are detected. The update is atomic.
+        If no changes are found, it just updates the 'last_updated' timestamp.
 
         :param video_id: YouTube video ID
         :return: updated video Info or None on failure
         """
         try:
-            # Get fresh video data
-            video_info = self.downloader.get_video_info(video_id)
-            if not video_info:
+            # --- 1. Fetch new data and old data ---
+            new_video_info = self.downloader.get_video_info(video_id)
+            if not new_video_info:
                 print(f"WARNING: Failed to fetch updated info for video {video_id}, downloader returned None.")
-                # Update status to indicate fetch failure during update
                 self.storage._update_video_status(video_id, 'unavailable')
                 return None
 
-            # Ensure channel exists (minimal check/fetch, don't force update channel)
-            channel_id = video_info.get('channel_id')
-            if channel_id and not self.channel_manager.get_channel(channel_id):
-                print(f"Warning: Channel {channel_id} for video {video_id} not found during update. Fetching channel info...")
-                try:
-                    self.channel_manager.process(channel_id, force_update=False) # Don't force channel update
-                except Exception as e:
-                    print(f"Error fetching/processing channel {channel_id} during video update: {e}")
-                    # If the channel cannot be fetched we won't update the video
-                    return None
-
-            # --- Save Core Video Data ---
-            self.storage.save_video(video_info)
-
-            # --- Save Tags ---
-            tags_to_save = video_info.get('tags', [])
-            self.storage.save_video_tags(video_id, tags_to_save)
+            old_video = self.storage.get_video(video_id)
+            if not old_video:
+                # This case should ideally not be hit if called from process(), but as a safeguard:
+                print(f"ERROR: Cannot update video {video_id} as it does not exist in the database.")
+                return None
             
-            # --- Fetch and Save Timestamps (Update) ---
-            video_timestamps = self.downloader.get_video_timestamps(video_id)
-            self.storage.save_video_timestamps(video_id, video_timestamps)
+            old_transcript = self.storage.get_transcript(video_id)
 
-            # --- Fetch and Save Transcript (VTT + plain text) ---
-            try:
-                tr = self.downloader.get_raw_video_transcript(video_id)
-                if tr and tr.get('vtt'):
-                    vtt = tr['vtt']
-                    lang = tr.get('lang') or 'unknown'
-                    source = tr.get('source')
-                    is_translation = bool(tr.get('is_translation'))
-                    # Normalize for a stable hash
-                    normalized_vtt = '\n'.join(line.rstrip() for line in vtt.replace('\r\n', '\n').replace('\r', '\n').split('\n'))
-                    vtt_hash = hashlib.sha256(normalized_vtt.encode('utf-8')).hexdigest()
+            # --- 2. Compare and decide what to update ---
+            changes = {}
+            
+            # Data to pass to transactional update, initialized to None
+            data_to_update = {
+                'video_info': None,
+                'tags': None,
+                'timestamps': None,
+                'transcript_data': None
+            }
 
-                    plain_text = TranscriptParser(vtt).get_plain_text()
-                    self.storage.save_transcript(
-                        video_id=video_id,
-                        vtt=vtt,
-                        plain_text=plain_text,
-                        lang=lang,
-                        source=source,
-                        is_translation=is_translation,
-                        vtt_hash=vtt_hash
-                    )
-            except Exception as e:
-                print(f"Warning: failed to fetch/save transcript for {video_id}: {e}")
+            # Compare core info fields
+            core_fields_to_check = ['title', 'description', 'view_count', 'like_count', 'duration']
+            for field in core_fields_to_check:
+                if old_video.get(field) != new_video_info.get(field):
+                    changes['video_info'] = True
+                    data_to_update['video_info'] = new_video_info
+                    break
+            
+            # Compare tags (normalized, case-insensitive, trimmed)
+            new_tags = set(t.strip().lower() for t in new_video_info.get('tags', []) if isinstance(t, str) and t.strip())
+            old_tags = set(t.strip().lower() for t in old_video.get('tags', []) if isinstance(t, str) and t.strip())
+            if new_tags != old_tags:
+                changes['tags'] = True
+                data_to_update['tags'] = sorted(list(new_tags)) # Save normalized list
 
-            print(f"Successfully updated video {video_id} in database.")
-            return video_info
+            # Compare timestamps
+            new_timestamps = self.downloader.get_video_timestamps(video_id) or []
+            # Convert lists of dicts to something hashable for comparison, like a tuple of tuples
+            old_ts_comparable = tuple(sorted((d['time_seconds'], d['description']) for d in old_video.get('timestamps', [])))
+            new_ts_comparable = tuple(sorted((d['start_time'], d['title']) for d in new_timestamps))
+            if old_ts_comparable != new_ts_comparable:
+                changes['timestamps'] = True
+                data_to_update['timestamps'] = new_timestamps
+
+            # Compare transcript using hash
+            new_tr_raw = self.downloader.get_raw_video_transcript(video_id)
+            new_tr_data_for_save = None
+            new_vtt_hash = None
+
+            if new_tr_raw and new_tr_raw.get('vtt'):
+                # Compute hash using centralized utility for consistency
+                new_vtt_hash = compute_vtt_hash(new_tr_raw['vtt'])
+                
+                if not old_transcript or old_transcript.get('vtt_hash') != new_vtt_hash:
+                    changes['transcript'] = True
+                    plain_text = TranscriptParser(new_tr_raw['vtt']).get_plain_text()
+                    new_tr_data_for_save = {
+                        'vtt': new_tr_raw['vtt'], 'plain_text': plain_text,
+                        'lang': new_tr_raw.get('lang') or 'unknown', 'source': new_tr_raw.get('source'),
+                        'is_translation': bool(new_tr_raw.get('is_translation')), 'vtt_hash': new_vtt_hash
+                    }
+            # If no new transcript is available, keep the existing transcript unchanged (no-op)
+
+            if changes.get('transcript'):
+                data_to_update['transcript_data'] = new_tr_data_for_save
+
+
+            # --- 3. Execute update if changes were detected ---
+            if not changes:
+                print(f"No data changes detected for video {video_id}. Refreshing timestamp.")
+                self.storage.touch_video_timestamp(video_id)
+            else:
+                print(f"Changes detected for video {video_id} in: {list(changes.keys())}. Performing transactional update.")
+                
+                # Ensure channel exists before transaction
+                channel_id = new_video_info.get('channel_id')
+                if channel_id and not self.channel_manager.get_channel(channel_id):
+                    self.channel_manager.process(channel_id, force_update=False)
+
+                self.storage.save_video_update_transactional(
+                    video_id=video_id,
+                    video_info=data_to_update['video_info'],
+                    tags=data_to_update['tags'],
+                    timestamps=data_to_update['timestamps'],
+                    transcript_data=data_to_update['transcript_data']
+                )
+                print(f"Successfully updated video {video_id} in database.")
+
+            return self.storage.get_video(video_id) # Return the fresh data from DB
 
         except Exception as e:
             print(f"Error updating video {video_id}: {str(e)}")
-            self.storage._update_video_status(video_id, 'update_error')
+            try:
+                self.storage._update_video_status(video_id, 'update_error')
+            except Exception as status_e:
+                print(f"Failed to update video status to 'update_error' for {video_id}: {status_e}")
             return None
 
     def get_transcript_plain(self, video_id: str, lang: str = None) -> Union[str, None]:

@@ -4,6 +4,7 @@ import os
 import hashlib
 import time
 from pydantic import BaseModel
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -270,6 +271,61 @@ def get_video(video_id: str):
         return video
     except sqlite3.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
+
+@app.post("/api/videos/{video_id}/update", status_code=200)
+def update_video(video_id: str):
+    """
+    Triggers a forced update of a video's metadata from external sources.
+    The update is atomic and only writes to the database if changes are detected.
+    Returns a simple success message.
+
+    - **video_id**: The ID of the video to update.
+    """
+    try:
+        # Using force_update=True ensures the update logic runs regardless of the last_updated timestamp.
+        updated_video = client.video_manager.process(video_id, force_update=True)
+        
+        if updated_video is None:
+            # This can happen if the video becomes unavailable or another error occurs during the process.
+            raise HTTPException(status_code=500, detail=f"Failed to update video '{video_id}'. The video may be unavailable or an internal error occurred.")
+        
+        return {"message": f"Video '{video_id}' updated successfully."}
+    except HTTPException:
+        # Re-raise exceptions from the client layer if they are already HTTPExceptions
+        raise
+    except Exception as e:
+        # Catch-all for other unexpected errors
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred during video update: {e}")
+    
+
+
+##### TRANSCRIPT ENDPOINTS #####
+
+@app.get("/api/videos/{video_id}/transcript")
+def get_video_transcript(video_id: str, lang: Optional[str] = Query(None)):
+    """
+    Returns the transcript plain text and the same text segmented by chapters.
+    - lang: Optional language preference. If omitted, backend picks the best available.
+    """
+    try:
+        plain = client.video_manager.get_transcript_plain(video_id, lang)
+        if plain is None:
+            raise HTTPException(status_code=404, detail=f"No transcript found for video '{video_id}'")
+
+        chapters = client.video_manager.get_transcript_by_chapters(video_id, lang) or []
+        return {
+            "video_id": video_id,
+            "lang": lang,  # echo back requested lang (actual stored lang may differ if None)
+            "plain_text": plain,
+            "chapters": chapters  # [{'chapter_title','start_time','text'}, ...]
+        }
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
     
