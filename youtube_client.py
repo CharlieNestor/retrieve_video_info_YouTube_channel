@@ -11,6 +11,7 @@ from channel_manager import ChannelManager
 from video_manager import VideoManager
 from playlist_manager import PlaylistManager
 from library_manager import LibraryManager
+from llm_service import LLMService
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -43,8 +44,29 @@ class YouTubeClient:
                 print("WARNING: DOWNLOAD_DIR environment variable not found. Defaulting to system Downloads folder.")
                 download_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
         
+        # Minimal fallback: if DOWNLOAD_DIR is missing or unusable, use ~/Downloads/YouTubeLibrary
+        system_downloads = os.path.join(os.path.expanduser('~'), 'Downloads')
+        fallback_dir = os.path.join(system_downloads, 'YouTubeLibrary')
+
+        # Try to detect unmounted external volumes and other path issues
+        try:
+            candidate = os.path.abspath(download_dir)
+            if candidate.startswith('/Volumes/'):
+                parts = candidate.split('/')
+                if len(parts) >= 3:
+                    mount = f"/Volumes/{parts[2]}"
+                    if not (os.path.exists(mount) and os.path.ismount(mount)):
+                        print(f"WARNING: {mount} not mounted. Using {fallback_dir}.")
+                        download_dir = fallback_dir
+        except Exception:
+            download_dir = fallback_dir
+        
         # Ensure the download directory exists
-        os.makedirs(download_dir, exist_ok=True)
+        try:
+            os.makedirs(download_dir, exist_ok=True)
+        except Exception:
+            download_dir = fallback_dir
+            os.makedirs(download_dir, exist_ok=True)
 
         if database_path is None:
             print("WARNING: No database path specified via parameter. Defaulting to 'youtube.db'.")
@@ -62,6 +84,7 @@ class YouTubeClient:
         self.video_manager = VideoManager(self.storage, self.downloader, self.channel_manager)
         self.playlist_manager = PlaylistManager(self.storage, self.downloader, self.video_manager)
         self.library_manager = LibraryManager(storage=self.storage, download_dir=download_dir, video_manager=self.video_manager, downloader=self.downloader)
+        self.llm_service = LLMService(self.video_manager)
 
         # 4. Sync library on startup
         #self.library_manager.sync_library()

@@ -4,11 +4,14 @@ This is a full-stack application designed to fetch, store, and browse metadata f
 
 ## Features
 
-- **Local Metadata Storage**: Fetches comprehensive data via `yt-dlp` and stores it in a local SQLite database.
-- **Web Interface**: A modern React UI to browse and manage your library of channels, playlists, and videos.
-- **URL Processing**: Simply paste a YouTube URL (channel, video, or playlist) to add it to your library.
-- **Visual Browsing**: View your channels in a clean, card-based layout with thumbnails.
-- **Detailed Views**: Click on a channel to see its detailed information and a list of all its videos stored in your library.
+- **Local SQLite Library**: Fetch rich metadata via `yt-dlp` and store it locally.
+- **URL Intake**: Paste a channel, video, or playlist URL to add entries.
+- **Channel Browser UI**: Grid of channels with cached thumbnails (via image proxy).
+- **Video Details**: Views, likes, duration, publish date, tags, and description.
+- **Transcripts**: Plain text plus chapter breakdown when available.
+- **Ask the Transcript**: Chat-style Q&A over the video’s transcript.
+- **One‑click Refresh**: Update a video’s metadata and transcript on demand.
+- **Download Awareness**: See downloaded state and copy the local file path.
 
 
 ## Tech Stack
@@ -18,7 +21,7 @@ This is a full-stack application designed to fetch, store, and browse metadata f
 - **Database**: SQLite
 - **Frontend**: React, Vite, React-Bootstrap
 
-## Setup and Installation
+## Setup
 
 To get the project running locally, follow these steps.
 
@@ -35,7 +38,7 @@ From the project root directory, set up the Python virtual environment and insta
 
 ```bash
 # Create and activate a virtual environment
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 
 # Install required packages
@@ -58,14 +61,19 @@ The application can be configured by creating a `.env` file in the root of the p
 ```
 # .env file
 DOWNLOAD_DIR=/path/to/your/desired/download/folder
+GOOGLE_API_KEY=your_google_genai_api_key
 ```
 
 - **`DOWNLOAD_DIR`**: Specifies the directory where video files will be downloaded. 
   - If this variable is not set, the application will default to using your system's standard `Downloads` folder.
 
+- **`GOOGLE_API_KEY`**: Enables the “Ask the Transcript” feature. If omitted, LLM Q&A is disabled.
+
 - **Database Location**: The SQLite database file (`youtube.db`) will be automatically created inside the download directory (either the one you specified in `DOWNLOAD_DIR` or the default `Downloads` folder).
 
 ## Running the Application
+
+Note: this project currently runs in two terminals (backend + frontend) because it’s still a work in progress. We plan to streamline this.
 
 This project requires two terminals running concurrently: one for the backend API and one for the frontend web server.
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Spinner, Alert, Row, Col, Badge, Button, Table } from 'react-bootstrap';
+import { Card, Spinner, Alert, Row, Col, Badge, Button, Table, Form } from 'react-bootstrap';
 import ExpandableText from '../ExpandableText';
 import { getProxyUrl, formatDuration, formatDate } from '../utils';
 
@@ -61,6 +61,14 @@ function VideoDetailView({ videoId, onBack }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState({ message: '', type: '' });
 
+  // State for LLM Query Feature
+  const [query, setQuery] = useState('');
+  const [conversation, setConversation] = useState([]);
+  const [isLlmLoading, setIsLlmLoading] = useState(false);
+  const [llmError, setLlmError] = useState('');
+  const [sessionId, setSessionId] = useState(null);
+
+
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopyButtonText('Copied!');
@@ -111,6 +119,12 @@ function VideoDetailView({ videoId, onBack }) {
   useEffect(() => {
     fetchVideoDetails();
     fetchTranscript();
+    // When the video changes, generate a new session ID for the chat.
+    setSessionId(crypto.randomUUID());
+    // Also reset the conversation history.
+    setConversation([]);
+    setLlmError('');
+    setQuery('');
   }, [videoId]);
 
   const handleUpdate = () => {
@@ -139,6 +153,46 @@ function VideoDetailView({ videoId, onBack }) {
       setTimeout(() => setUpdateStatus({ message: '', type: '' }), 5000);
     });
   };
+
+  const handleQuerySubmit = (e) => {
+    e.preventDefault();
+    if (!query.trim() || !sessionId) return;
+
+    setIsLlmLoading(true);
+    setLlmError('');
+    const currentQuery = query;
+
+    fetch(`http://127.0.0.1:8000/api/videos/${videoId}/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        query: currentQuery,
+        session_id: sessionId,
+        // lang: 'en' // Optionally specify language
+      }),
+    })
+    .then(response => {
+      if (!response.ok) {
+        return response.json().then(err => { throw new Error(err.detail || 'Failed to get answer.'); });
+      }
+      return response.json();
+    })
+    .then(data => {
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      // Add the new question and answer to the conversation history
+      setConversation(prev => [...prev, { query: currentQuery, answer: data.answer }]);
+      setQuery(''); // Clear the input field
+    })
+    .catch(error => {
+      setLlmError(error.message);
+    })
+    .finally(() => {
+      setIsLlmLoading(false);
+    });
+  };
+
 
   if (loading) {
     return <div className="text-center"><Spinner animation="border" /></div>;
@@ -241,6 +295,84 @@ function VideoDetailView({ videoId, onBack }) {
                 <ExpandableText text={details.description} maxLength={250} />
             </div>
         )}
+
+        {/* --- AI Query Section --- */}
+        <Card className="my-4" bg="dark" border="secondary">
+          <Card.Body>
+            <Card.Title>Ask the Transcript</Card.Title>
+            
+            <div 
+              className="mb-4 p-3" 
+              style={{ 
+                maxHeight: '400px', 
+                overflowY: 'auto', 
+                backgroundColor: '#1c1c1c', 
+                borderRadius: '8px' 
+              }}
+            >
+              {conversation.length === 0 && !isLlmLoading && (
+                <div className="text-center text-muted">
+                  Your conversation will appear here.
+                </div>
+              )}
+
+              {conversation.map((exchange, index) => (
+                <div key={index} className="mb-3">
+                  {/* User's Question */}
+                  <div className="mb-2">
+                    <div className="fw-bold small text-muted">You</div>
+                    <Card bg="secondary" text="white" className="mb-2">
+                      <Card.Body className="p-2">
+                        <Card.Text>{exchange.query}</Card.Text>
+                      </Card.Body>
+                    </Card>
+                  </div>
+                  
+                  {/* Assistant's Answer */}
+                  <div>
+                    <div className="fw-bold small text-muted">Assistant</div>
+                    <Card bg="dark" text="white" style={{ borderColor: '#444' }}>
+                      <Card.Body className="p-2">
+                        <Card.Text style={{ whiteSpace: 'pre-wrap' }}>{exchange.answer}</Card.Text>
+                      </Card.Body>
+                    </Card>
+                  </div>
+                </div>
+              ))}
+
+              {isLlmLoading && (
+                <div className="text-center mt-3">
+                  <Spinner animation="border" size="sm" role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </Spinner>
+                </div>
+              )}
+            </div>
+
+            {llmError && <Alert variant="danger">{llmError}</Alert>}
+
+            <Form onSubmit={handleQuerySubmit}>
+              <Form.Group className="mb-3">
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  placeholder="Ask a question about this video's transcript..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  disabled={!transcriptPlainText || isLlmLoading}
+                />
+                {!transcriptPlainText && <Form.Text className="text-muted">Transcript must be loaded to ask a question.</Form.Text>}
+              </Form.Group>
+              <Button variant="primary" type="submit" disabled={isLlmLoading || !query.trim()}>
+                {isLlmLoading ? (
+                  <><Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> Asking...</>
+                ) : (
+                  'Ask'
+                )}
+              </Button>
+            </Form>
+          </Card.Body>
+        </Card>
 
         {transcriptChapters && transcriptChapters.length > 0 && (
           <div className="mt-3 mb-5">
