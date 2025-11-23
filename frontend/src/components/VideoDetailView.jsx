@@ -119,10 +119,27 @@ function VideoDetailView({ videoId, onBack }) {
   useEffect(() => {
     fetchVideoDetails();
     fetchTranscript();
-    // When the video changes, generate a new session ID for the chat.
-    setSessionId(crypto.randomUUID());
-    // Also reset the conversation history.
-    setConversation([]);
+    
+    // Session Management Logic
+    const storageKey = `chat_session_${videoId}`;
+    const storedSession = sessionStorage.getItem(storageKey);
+    
+    if (storedSession) {
+      // Restore existing session
+      setSessionId(storedSession);
+      // Note: We currently don't persist the message history in sessionStorage,
+      // so the UI will look empty, but the Backend will remember the context.
+      // Ideally, we would fetch the history from the backend here, but for now
+      // we just ensure the LLM context is preserved.
+      setConversation([]); 
+    } else {
+      // Create new session
+      const newSessionId = crypto.randomUUID();
+      sessionStorage.setItem(storageKey, newSessionId);
+      setSessionId(newSessionId);
+      setConversation([]);
+    }
+
     setLlmError('');
     setQuery('');
   }, [videoId]);

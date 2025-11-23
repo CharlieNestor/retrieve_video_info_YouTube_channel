@@ -353,7 +353,7 @@ def ask_video_question(video_id: str, item: LLMQueryItem):
         result = client.llm_service.ask(
             video_id=video_id,
             session_id=item.session_id,
-            query=item.query,
+            question=item.query,
             lang=item.lang
         )
         
