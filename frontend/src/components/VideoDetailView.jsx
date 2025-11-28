@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Spinner, Alert, Row, Col, Badge, Button, Table, Form } from 'react-bootstrap';
+import { Card, Spinner, Alert, Row, Col, Badge, Button, Table, Form, Modal } from 'react-bootstrap';
 import ExpandableText from '../ExpandableText';
 import { getProxyUrl, formatDuration, formatDate } from '../utils';
 
@@ -61,6 +61,10 @@ function VideoDetailView({ videoId, onBack }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState({ message: '', type: '' });
 
+  // State for Delete Feature
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // State for LLM Query Feature
   const [query, setQuery] = useState('');
   const [conversation, setConversation] = useState([]);
@@ -119,11 +123,11 @@ function VideoDetailView({ videoId, onBack }) {
   useEffect(() => {
     fetchVideoDetails();
     fetchTranscript();
-    
+
     // Session Management Logic
     const storageKey = `chat_session_${videoId}`;
     const storedSession = sessionStorage.getItem(storageKey);
-    
+
     if (storedSession) {
       // Restore existing session
       setSessionId(storedSession);
@@ -131,7 +135,7 @@ function VideoDetailView({ videoId, onBack }) {
       // so the UI will look empty, but the Backend will remember the context.
       // Ideally, we would fetch the history from the backend here, but for now
       // we just ensure the LLM context is preserved.
-      setConversation([]); 
+      setConversation([]);
     } else {
       // Create new session
       const newSessionId = crypto.randomUUID();
@@ -151,24 +155,24 @@ function VideoDetailView({ videoId, onBack }) {
     fetch(`http://127.0.0.1:8000/api/videos/${videoId}/update`, {
       method: 'POST',
     })
-    .then(response => {
-      if (!response.ok) {
-        return response.json().then(err => { throw new Error(err.detail || 'Update failed'); });
-      }
-      return response.json();
-    })
-    .then(data => {
-      setUpdateStatus({ message: data.message || 'Video updated successfully!', type: 'success' });
-      fetchVideoDetails();
-      fetchTranscript();
-    })
-    .catch(error => {
-      setUpdateStatus({ message: error.message, type: 'danger' });
-    })
-    .finally(() => {
-      setIsUpdating(false);
-      setTimeout(() => setUpdateStatus({ message: '', type: '' }), 5000);
-    });
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(err => { throw new Error(err.detail || 'Update failed'); });
+        }
+        return response.json();
+      })
+      .then(data => {
+        setUpdateStatus({ message: data.message || 'Video updated successfully!', type: 'success' });
+        fetchVideoDetails();
+        fetchTranscript();
+      })
+      .catch(error => {
+        setUpdateStatus({ message: error.message, type: 'danger' });
+      })
+      .finally(() => {
+        setIsUpdating(false);
+        setTimeout(() => setUpdateStatus({ message: '', type: '' }), 5000);
+      });
   };
 
   const handleQuerySubmit = (e) => {
@@ -182,33 +186,58 @@ function VideoDetailView({ videoId, onBack }) {
     fetch(`http://127.0.0.1:8000/api/videos/${videoId}/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         query: currentQuery,
         session_id: sessionId,
         // lang: 'en' // Optionally specify language
       }),
     })
-    .then(response => {
-      if (!response.ok) {
-        return response.json().then(err => { throw new Error(err.detail || 'Failed to get answer.'); });
-      }
-      return response.json();
-    })
-    .then(data => {
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      // Add the new question and answer to the conversation history
-      setConversation(prev => [...prev, { query: currentQuery, answer: data.answer }]);
-      setQuery(''); // Clear the input field
-    })
-    .catch(error => {
-      setLlmError(error.message);
-    })
-    .finally(() => {
-      setIsLlmLoading(false);
-    });
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(err => { throw new Error(err.detail || 'Failed to get answer.'); });
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        // Add the new question and answer to the conversation history
+        setConversation(prev => [...prev, { query: currentQuery, answer: data.answer }]);
+        setQuery(''); // Clear the input field
+      })
+      .catch(error => {
+        setLlmError(error.message);
+      })
+      .finally(() => {
+        setIsLlmLoading(false);
+      });
   };
+
+  const handleDelete = () => {
+    setIsDeleting(true);
+
+    fetch(`http://127.0.0.1:8000/api/videos/${videoId}`, {
+      method: 'DELETE',
+    })
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(err => { throw new Error(err.detail || 'Delete failed'); });
+        }
+        return response.json();
+      })
+      .then(() => {
+        // Success - go back to previous view
+        onBack();
+      })
+      .catch(error => {
+        setUpdateStatus({ message: error.message, type: 'danger' });
+        setShowDeleteModal(false);
+        setIsDeleting(false);
+        setTimeout(() => setUpdateStatus({ message: '', type: '' }), 5000);
+      });
+  };
+
 
 
   if (loading) {
@@ -249,11 +278,11 @@ function VideoDetailView({ videoId, onBack }) {
         <Card.Subtitle className="mb-3 text-muted">By {details.channel_title}</Card.Subtitle>
 
         {details.thumbnail_url && (
-            <img 
-                src={getProxyUrl(details.thumbnail_url)} 
-                alt={`Thumbnail for ${details.title}`} 
-                style={{ width: '100%', borderRadius: '8px', marginBottom: '1.5rem' }} 
-            />
+          <img
+            src={getProxyUrl(details.thumbnail_url)}
+            alt={`Thumbnail for ${details.title}`}
+            style={{ width: '100%', borderRadius: '8px', marginBottom: '1.5rem' }}
+          />
         )}
 
         <div className="d-flex justify-content-between align-items-center mb-2">
@@ -275,12 +304,12 @@ function VideoDetailView({ videoId, onBack }) {
         {details.downloaded === 1 && details.file_path && (
           <div className="mb-3">
             <div className="d-flex justify-content-between align-items-center">
-                <p className="mb-1"><strong>File Path:</strong></p>
-                <div style={{ paddingRight: '40px' }}>
-                    <Button style={{ whiteSpace: 'nowrap' }} variant="outline-secondary" size="sm" onClick={() => handleCopy(details.file_path)}>
-                        {copyButtonText}
-                    </Button>
-                </div>
+              <p className="mb-1"><strong>File Path:</strong></p>
+              <div style={{ paddingRight: '40px' }}>
+                <Button style={{ whiteSpace: 'nowrap' }} variant="outline-secondary" size="sm" onClick={() => handleCopy(details.file_path)}>
+                  {copyButtonText}
+                </Button>
+              </div>
             </div>
             <p className="text-muted" style={{ wordBreak: 'break-all' }}>
               {details.file_path}
@@ -289,10 +318,10 @@ function VideoDetailView({ videoId, onBack }) {
         )}
 
         <Row className="mb-3">
-            <Col><strong>Views:</strong> {details.view_count?.toLocaleString() || 'N/A'}</Col>
-            <Col><strong>Likes:</strong> {details.like_count?.toLocaleString() || 'N/A'}</Col>
-            <Col><strong>Duration:</strong> {formatDuration(details.duration)}</Col>
-            <Col><strong>Published:</strong> {formatDate(details.published_at)}</Col>
+          <Col><strong>Views:</strong> {details.view_count?.toLocaleString() || 'N/A'}</Col>
+          <Col><strong>Likes:</strong> {details.like_count?.toLocaleString() || 'N/A'}</Col>
+          <Col><strong>Duration:</strong> {formatDuration(details.duration)}</Col>
+          <Col><strong>Published:</strong> {formatDate(details.published_at)}</Col>
         </Row>
 
         {details.tags && details.tags.length > 0 && (
@@ -307,24 +336,24 @@ function VideoDetailView({ videoId, onBack }) {
         )}
 
         {details.description && (
-            <div className="mt-3 mb-5">
-                <strong>Description:</strong>
-                <ExpandableText text={details.description} maxLength={250} />
-            </div>
+          <div className="mt-3 mb-5">
+            <strong>Description:</strong>
+            <ExpandableText text={details.description} maxLength={250} />
+          </div>
         )}
 
         {/* --- AI Query Section --- */}
         <Card className="my-4" bg="dark" border="secondary">
           <Card.Body>
             <Card.Title>Ask the Transcript</Card.Title>
-            
-            <div 
-              className="mb-4 p-3" 
-              style={{ 
-                maxHeight: '400px', 
-                overflowY: 'auto', 
-                backgroundColor: '#1c1c1c', 
-                borderRadius: '8px' 
+
+            <div
+              className="mb-4 p-3"
+              style={{
+                maxHeight: '400px',
+                overflowY: 'auto',
+                backgroundColor: '#1c1c1c',
+                borderRadius: '8px'
               }}
             >
               {conversation.length === 0 && !isLlmLoading && (
@@ -344,7 +373,7 @@ function VideoDetailView({ videoId, onBack }) {
                       </Card.Body>
                     </Card>
                   </div>
-                  
+
                   {/* Assistant's Answer */}
                   <div>
                     <div className="fw-bold small text-muted">Assistant</div>
@@ -426,7 +455,46 @@ function VideoDetailView({ videoId, onBack }) {
           </div>
         )}
 
+        {/* Delete Button - Bottom Left */}
+        <div className="mt-4">
+          <Button
+            variant="danger"
+            onClick={() => setShowDeleteModal(true)}
+            disabled={isDeleting}
+          >
+            Delete Video
+          </Button>
+        </div>
+
       </Card.Body>
+
+      {/* Delete Confirmation Modal */}
+      <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Confirm Deletion</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p>Are you sure you want to delete this video?</p>
+          <p className="text-muted mb-0">
+            <strong>{details?.title}</strong>
+          </p>
+          <p className="text-danger mt-3 mb-0">
+            <small>This action cannot be undone.</small>
+          </p>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowDeleteModal(false)} disabled={isDeleting}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={handleDelete} disabled={isDeleting}>
+            {isDeleting ? (
+              <><Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> Deleting...</>
+            ) : (
+              'Delete'
+            )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </Card>
   );
 }

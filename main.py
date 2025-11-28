@@ -306,6 +306,23 @@ def update_video(video_id: str):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred during video update: {e}")
     
 
+@app.delete("/api/videos/{video_id}", status_code=200)
+def delete_video(video_id: str):
+    """
+    Deletes a video from the database.
+
+    - **video_id**: The ID of the video to delete.
+    """
+    try:
+        client.video_manager.delete_video(video_id)
+        return {"message": f"Video '{video_id}' deleted successfully."}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
+
 
 ##### TRANSCRIPT ENDPOINTS #####
 

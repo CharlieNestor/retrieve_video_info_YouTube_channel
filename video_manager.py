@@ -337,6 +337,22 @@ class VideoManager:
         """
         return self.storage.list_all_videos()
 
+    def delete_video(self, video_id: str):
+        """
+        Deletes a video from the database and verifies the deletion.
+        
+        :param video_id: The YouTube video ID to delete
+        :raises ValueError: If video doesn't exist or deletion verification fails
+        """
+        # Delete from storage (will raise ValueError if video doesn't exist)
+        self.storage.delete_video(video_id)
+        
+        # Verify deletion succeeded
+        if self.storage.get_video(video_id) is not None:
+            raise ValueError(f"Video {video_id} deletion failed - video still exists in database")
+        
+        print(f"Successfully deleted video {video_id}")
+
     def download_video(self, video_id: str, force_download: bool=False) -> str:
             """
             Downloads a video file, updates its status in the database, 
