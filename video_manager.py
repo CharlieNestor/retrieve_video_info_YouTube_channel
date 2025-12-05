@@ -339,19 +339,62 @@ class VideoManager:
 
     def delete_video(self, video_id: str):
         """
-        Deletes a video from the database and verifies the deletion.
+        Deletes a video from the database and removes the downloaded file if it exists.
+        
+        This process follows a strict "Check then Act" pattern:
+        1. VERIFICATION PHASE (Blocking):
+           - Checks consistency for the video.
+           - If marked as 'downloaded', it MUST have a valid 'file_path'.
+           - The file at 'file_path' MUST exist on the filesystem.
+           - If ANY inconsistency is found, the process ABORTS with a ValueError.
+        
+        2. EXECUTION PHASE (Destructive):
+           - Deletes the video file from disk (if downloaded).
+           - Deletes the video record from the database.
         
         :param video_id: The YouTube video ID to delete
-        :raises ValueError: If video doesn't exist or deletion verification fails
+        :raises ValueError: If video doesn't exist, deletion verification fails, or file inconsistency found.
         """
-        # Delete from storage (will raise ValueError if video doesn't exist)
+        # --- 1. Get video info ---
+        video_info = self.storage.get_video(video_id)
+        if not video_info:
+            raise ValueError(f"Video {video_id} does not exist in the database.")
+
+        # --- 2. VERIFICATION PHASE ---
+        file_to_delete = None
+        
+        if video_info.get('downloaded') == 1:
+            file_path = video_info.get('file_path')
+            
+            # Check 1: Flag is 1, so file_path MUST be present
+            if not file_path:
+                raise ValueError(f"ABORTING DELETION: Inconsistency detected: Video {video_id} is marked as downloaded but has no file path.")
+            
+            # Check 2: File at file_path MUST exist
+            if not os.path.exists(file_path):
+                raise ValueError(f"ABORTING DELETION: Inconsistency detected: Video {video_id} marked as downloaded, but file not found at {file_path}")
+            
+            file_to_delete = file_path
+
+        # --- 3. EXECUTION PHASE ---
+        
+        # A. Delete file if applicable
+        if file_to_delete:
+            try:
+                os.remove(file_to_delete)
+                print(f"Successfully deleted video file: {file_to_delete}")
+            except OSError as e:
+                # Abort before DB deletion if file deletion fails (preserve state)
+                raise ValueError(f"Failed to delete video file {file_to_delete}: {e}. Aborting database deletion.")
+
+        # B. Delete from storage
         self.storage.delete_video(video_id)
         
-        # Verify deletion succeeded
+        # 4. Verify deletion succeeded (paranoid check)
         if self.storage.get_video(video_id) is not None:
             raise ValueError(f"Video {video_id} deletion failed - video still exists in database")
         
-        print(f"Successfully deleted video {video_id}")
+        print(f"Successfully deleted video {video_id} record from database.")
 
     def download_video(self, video_id: str, force_download: bool=False) -> str:
             """

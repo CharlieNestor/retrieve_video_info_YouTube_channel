@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Spinner, Alert, Row, Col, Button } from 'react-bootstrap';
+import { Card, Spinner, Alert, Row, Col, Button, Modal } from 'react-bootstrap';
 import VideoDetailView from './VideoDetailView';
 import { getProxyUrl, formatDate } from '../utils';
 
@@ -11,6 +11,11 @@ function ChannelDetailView({ channelId, onBack }) {
   const [error, setError] = useState(null);
   const [selectedVideoId, setSelectedVideoId] = useState(null); // State for video navigation
 
+  // State for Delete Feature
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
   useEffect(() => {
     // Only fetch channel data if we are not viewing a video
     if (!selectedVideoId) {
@@ -19,20 +24,44 @@ function ChannelDetailView({ channelId, onBack }) {
         fetch(`http://127.0.0.1:8000/api/channels/${channelId}`),
         fetch(`http://127.0.0.1:8000/api/channels/${channelId}/videos`)
       ])
-      .then(async ([resDetails, resVideos]) => {
-        if (!resDetails.ok) throw new Error(`Failed to fetch channel details.`);
-        if (!resVideos.ok) throw new Error(`Failed to fetch channel videos.`);
-        
-        const detailsData = await resDetails.json();
-        const videosData = await resVideos.json();
+        .then(async ([resDetails, resVideos]) => {
+          if (!resDetails.ok) throw new Error(`Failed to fetch channel details.`);
+          if (!resVideos.ok) throw new Error(`Failed to fetch channel videos.`);
 
-        setDetails(detailsData);
-        setVideos(videosData);
-      })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
+          const detailsData = await resDetails.json();
+          const videosData = await resVideos.json();
+
+          setDetails(detailsData);
+          setVideos(videosData);
+        })
+        .catch(err => setError(err.message))
+        .finally(() => setLoading(false));
     }
   }, [channelId, selectedVideoId]); // Re-fetch if we come back from a video
+
+  const handleDelete = () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    fetch(`http://127.0.0.1:8000/api/channels/${channelId}`, {
+      method: 'DELETE',
+    })
+      .then(response => {
+        if (!response.ok) {
+          return response.json().then(err => { throw new Error(err.detail || 'Delete failed'); });
+        }
+        return response.json();
+      })
+      .then(() => {
+        // Success - go back to previous view
+        onBack();
+      })
+      .catch(error => {
+        setDeleteError(error.message);
+        setShowDeleteModal(false);
+        setIsDeleting(false);
+      });
+  };
 
   // --- Render Logic ---
 
@@ -61,10 +90,10 @@ function ChannelDetailView({ channelId, onBack }) {
         </Button>
 
         {details.banner_url && (
-          <img 
-            src={getProxyUrl(details.banner_url)} 
-            alt={`${details.name} banner`} 
-            style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '1.5rem' }} 
+          <img
+            src={getProxyUrl(details.banner_url)}
+            alt={`${details.name} banner`}
+            style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '1.5rem' }}
           />
         )}
 
@@ -82,7 +111,7 @@ function ChannelDetailView({ channelId, onBack }) {
             {details.description && <p className="mt-3">{details.description}</p>}
           </Col>
           <Col md={4} className="d-flex align-items-center justify-content-center">
-            {details.thumbnail_url && 
+            {details.thumbnail_url &&
               <Card.Img src={getProxyUrl(details.thumbnail_url)} className="result-thumbnail" />
             }
           </Col>
@@ -102,8 +131,8 @@ function ChannelDetailView({ channelId, onBack }) {
 
             {/* Video Rows */}
             {videos.map(video => (
-              <Row 
-                key={video.id} 
+              <Row
+                key={video.id}
                 className="py-2 border-bottom align-items-center is-clickable"
                 onClick={() => setSelectedVideoId(video.id)}
               >
@@ -120,6 +149,46 @@ function ChannelDetailView({ channelId, onBack }) {
         ) : (
           <p>No videos from this channel have been saved to the library yet.</p>
         )}
+        {deleteError && <Alert variant="danger" className="mt-3">{deleteError}</Alert>}
+
+        {/* Delete Button */}
+        <div className="mt-4 border-top pt-3">
+          <Button
+            variant="danger"
+            onClick={() => setShowDeleteModal(true)}
+            disabled={isDeleting}
+          >
+            Delete Channel
+          </Button>
+        </div>
+
+        {/* Delete Confirmation Modal */}
+        <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)} centered>
+          <Modal.Header closeButton>
+            <Modal.Title>Confirm Deletion</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <p>Are you sure you want to delete this channel?</p>
+            <p className="text-muted mb-0">
+              <strong>{details.name}</strong>
+            </p>
+            <Alert variant="warning" className="mt-3">
+              <strong>Warning:</strong> This will delete the channel and <strong>ALL</strong> associated videos, transcripts, and data from the library. This action cannot be undone.
+            </Alert>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setShowDeleteModal(false)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? (
+                <><Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> Deleting...</>
+              ) : (
+                'Delete Channel'
+              )}
+            </Button>
+          </Modal.Footer>
+        </Modal>
       </Card.Body>
     </Card>
   );
@@ -167,13 +236,13 @@ function ChannelList() {
       <Row xs={1} sm={2} md={3} lg={4} className="g-4">
         {channels.map(channel => (
           <Col key={channel.id}>
-            <Card 
+            <Card
               className="channel-card h-100"
               onClick={() => setSelectedChannelId(channel.id)}
             >
-              <Card.Img 
-                variant="top" 
-                src={getProxyUrl(channel.thumbnail_url) || 'https://via.placeholder.com/150'} 
+              <Card.Img
+                variant="top"
+                src={getProxyUrl(channel.thumbnail_url) || 'https://via.placeholder.com/150'}
                 className="channel-card-img"
               />
               <Card.Body>

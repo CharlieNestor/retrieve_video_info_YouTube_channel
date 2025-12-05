@@ -567,6 +567,18 @@ class MediaDownloader:
     # TODO: Implement method to get the list of online available video for a channel
 
 
+    def get_channel_dir(self, channel_name: str, channel_id: str) -> str:
+        """
+        Constructs the expected directory path for a channel.
+        
+        :param channel_name: The name of the channel.
+        :param channel_id: The ID of the channel.
+        :return: The absolute path to the channel's download directory.
+        """
+        sanitized_channel_name = sanitize_filename(channel_name)
+        channel_folder_name = f"{sanitized_channel_name} [{channel_id}]"
+        return os.path.join(self.download_dir, channel_folder_name)
+
     ###### DOWNLOAD METHODS #####
 
     def download_video(self, video_id: str, channel_id: str, channel_name: str) -> Union[str, None]:

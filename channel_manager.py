@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 from storage import SQLiteStorage
 from downloader import MediaDownloader
 from datetime import datetime
@@ -283,17 +284,68 @@ class ChannelManager:
     
     def delete_channel(self, channel_id: str):
         """
-        Deletes a channel and all its associated data from the database.
-
+        Deletes a channel and all its associated data from the database and local storage.
+        
+        It verifies that all downloaded videos have valid files on disk before deletion.
+        If any inconsistency is found, the process aborts.
+        
         :param channel_id: The ID of the channel to delete.
-        :raises ValueError: If the channel_id is empty or the channel is not found.
+        :raises ValueError: If channel not found or ANY file inconsistency is detected.
         :raises sqlite3.Error: For underlying database errors.
         """
         if not channel_id:
             raise ValueError("Channel ID cannot be empty for deletion.")
 
-        # The storage layer's delete_channel will raise a ValueError if not found.
-        # We let it propagate up to be handled by the API layer.
+        channel_info = self.storage.get_channel(channel_id)
+        if not channel_info:
+            raise ValueError(f"Channel with ID {channel_id} does not exist.")
+
+        print(f"Verifying consistency for channel {channel_id} deletion...")
+        videos_with_status = self.storage.get_videos_with_download_status(channel_id)
+        
+        videos_to_delete_files = []
+
+        for v_status in videos_with_status:
+            if v_status.get('downloaded') == 1:
+                full_video = self.storage.get_video(v_status['id'])
+                if not full_video:
+                     raise ValueError(f"CRITICAL: Video {v_status['id']} found in list but missing in detail fetch.")
+                
+                file_path = full_video.get('file_path')
+                
+                if not file_path:
+                    raise ValueError(f"ABORTING DELETION: Inconsistency detected for video {full_video['id']}. Marked as downloaded but 'file_path' is missing.")
+                
+                if not os.path.exists(file_path):
+                     raise ValueError(f"ABORTING DELETION: Inconsistency detected for video {full_video['id']}. marked as downloaded, but file not found at: {file_path}")
+                
+                videos_to_delete_files.append(file_path)
+
+        channel_dir = self.downloader.get_channel_dir(channel_info['name'], channel_id)
+        if videos_to_delete_files and not os.path.exists(channel_dir):
+             raise ValueError(f"ABORTING DELETION: Channel contains {len(videos_to_delete_files)} downloaded videos, but channel directory not found at: {channel_dir}")
+
+        print("Verification successful. Proceeding with deletion.")
+        
+        # Delete individual video files
+        import shutil
+        for file_path in videos_to_delete_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    print(f"Deleted file: {file_path}")
+            except OSError as e:
+                raise ValueError(f"Failed to delete file {file_path}: {e}. Aborting remainder of deletion.")
+
+        # Delete the channel directory
+        if os.path.exists(channel_dir):
+            try:
+                shutil.rmtree(channel_dir)
+                print(f"Deleted channel directory: {channel_dir}")
+            except OSError as e:
+                 raise ValueError(f"Failed to delete channel directory {channel_dir}: {e}")
+        
+        # Delete from DB
         self.storage.delete_channel(channel_id)
         print(f"Successfully deleted channel {channel_id} and all its associated data.")
 
