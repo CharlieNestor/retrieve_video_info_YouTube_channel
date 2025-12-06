@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Spinner, Alert, Row, Col, Badge, Button, Table, Form, Modal } from 'react-bootstrap';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import ExpandableText from '../ExpandableText';
 import { getProxyUrl, formatDuration, formatDate } from '../utils';
 
@@ -379,7 +381,11 @@ function VideoDetailView({ videoId, onBack }) {
                     <div className="fw-bold small text-muted">Assistant</div>
                     <Card bg="dark" text="white" style={{ borderColor: '#444' }}>
                       <Card.Body className="p-2">
-                        <Card.Text style={{ whiteSpace: 'pre-wrap' }}>{exchange.answer}</Card.Text>
+                        <div className="markdown-content">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {exchange.answer}
+                          </ReactMarkdown>
+                        </div>
                       </Card.Body>
                     </Card>
                   </div>

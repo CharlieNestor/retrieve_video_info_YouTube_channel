@@ -286,8 +286,18 @@ class ChannelManager:
         """
         Deletes a channel and all its associated data from the database and local storage.
         
-        It verifies that all downloaded videos have valid files on disk before deletion.
-        If any inconsistency is found, the process aborts.
+        This process follows a strict "Check then Act" pattern:
+        1. VERIFICATION PHASE (Blocking):
+           - Checks consistency for ALL videos in the channel.
+           - If a video is marked as 'downloaded', it MUST have a valid 'file_path'.
+           - The file at 'file_path' MUST exist on the filesystem.
+           - If ANY inconsistency is found (e.g., missing file, missing path), the process ABORTS
+             with a ValueError, and NOTHING is deleted.
+        
+        2. EXECUTION PHASE (Destructive):
+           - Deletes the confirmed video files from disk.
+           - Deletes the channel directory (cleaning up any extra files like thumbnails/metadata).
+           - Removes the channel and its metadata from the database (cascading to videos).
         
         :param channel_id: The ID of the channel to delete.
         :raises ValueError: If channel not found or ANY file inconsistency is detected.
@@ -296,10 +306,12 @@ class ChannelManager:
         if not channel_id:
             raise ValueError("Channel ID cannot be empty for deletion.")
 
+        # --- 1. Get channel info ---
         channel_info = self.storage.get_channel(channel_id)
         if not channel_info:
             raise ValueError(f"Channel with ID {channel_id} does not exist.")
 
+        # --- 2. VERIFICATION PHASE ---
         print(f"Verifying consistency for channel {channel_id} deletion...")
         videos_with_status = self.storage.get_videos_with_download_status(channel_id)
         
@@ -307,27 +319,33 @@ class ChannelManager:
 
         for v_status in videos_with_status:
             if v_status.get('downloaded') == 1:
+                # Need full info to get file_path
                 full_video = self.storage.get_video(v_status['id'])
                 if not full_video:
                      raise ValueError(f"CRITICAL: Video {v_status['id']} found in list but missing in detail fetch.")
                 
                 file_path = full_video.get('file_path')
                 
+                # Check 1: Flag is 1, so file_path MUST be present
                 if not file_path:
                     raise ValueError(f"ABORTING DELETION: Inconsistency detected for video {full_video['id']}. Marked as downloaded but 'file_path' is missing.")
                 
+                # Check 2: File at file_path MUST exist
                 if not os.path.exists(file_path):
                      raise ValueError(f"ABORTING DELETION: Inconsistency detected for video {full_video['id']}. marked as downloaded, but file not found at: {file_path}")
                 
                 videos_to_delete_files.append(file_path)
 
+        # Confirm channel folder existence if we have files (sanity check)
         channel_dir = self.downloader.get_channel_dir(channel_info['name'], channel_id)
         if videos_to_delete_files and not os.path.exists(channel_dir):
              raise ValueError(f"ABORTING DELETION: Channel contains {len(videos_to_delete_files)} downloaded videos, but channel directory not found at: {channel_dir}")
 
+        
+        # --- 3. EXECUTION PHASE ---
         print("Verification successful. Proceeding with deletion.")
         
-        # Delete individual video files
+        # A. Delete individual video files
         import shutil
         for file_path in videos_to_delete_files:
             try:
@@ -337,7 +355,7 @@ class ChannelManager:
             except OSError as e:
                 raise ValueError(f"Failed to delete file {file_path}: {e}. Aborting remainder of deletion.")
 
-        # Delete the channel directory
+        # B. Delete the channel directory (recursively removes leftovers)
         if os.path.exists(channel_dir):
             try:
                 shutil.rmtree(channel_dir)
@@ -345,7 +363,7 @@ class ChannelManager:
             except OSError as e:
                  raise ValueError(f"Failed to delete channel directory {channel_dir}: {e}")
         
-        # Delete from DB
+        # C. Delete from DB
         self.storage.delete_channel(channel_id)
         print(f"Successfully deleted channel {channel_id} and all its associated data.")
 

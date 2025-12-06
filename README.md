@@ -20,6 +20,7 @@ This is a full-stack application designed to fetch, store, and browse metadata f
 - **Data Retrieval**: `yt-dlp`
 - **Database**: SQLite
 - **Frontend**: React, Vite, React-Bootstrap
+- **Markdown Rendering**: `react-markdown` with `remark-gfm` for formatted LLM responses
 
 ## Setup
 
