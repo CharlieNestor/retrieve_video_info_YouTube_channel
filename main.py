@@ -250,12 +250,39 @@ def get_channel_tags(channel_id: str, limit: int = None, min_video_count: int = 
 
 
 @app.get("/api/videos")
-def list_videos():
+def list_videos(page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200)):
     """
-    Retrieves a list of all videos stored in the database.
+    Retrieves a paginated list of all videos stored in the database.
+    
+    - **page**: Page number (default: 1, minimum: 1)
+    - **per_page**: Number of videos per page (default: 50, min: 1, max: 200)
+    
+    Returns:
+        - videos: List of video objects for the requested page
+        - total: Total number of videos in the database
+        - page: Current page number
+        - per_page: Number of videos per page
+        - total_pages: Total number of pages
     """
     try:
-        return client.video_manager.list_all_videos()
+        # Calculate offset from page number
+        offset = (page - 1) * per_page
+        
+        # Get paginated results from video manager
+        result = client.video_manager.list_all_videos(limit=per_page, offset=offset)
+        
+        # Calculate total pages
+        import math
+        total_pages = math.ceil(result['total'] / per_page) if result['total'] > 0 else 1
+        
+        # Return enhanced response
+        return {
+            'videos': result['videos'],
+            'total': result['total'],
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages
+        }
     except sqlite3.Error as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
     except Exception as e:

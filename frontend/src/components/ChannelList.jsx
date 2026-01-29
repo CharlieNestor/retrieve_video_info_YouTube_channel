@@ -256,7 +256,7 @@ function ChannelList() {
   }
 
   return (
-    <div>
+    <div className="mb-5">
       <h2 className="mb-4">Channels in Library</h2>
       {content}
     </div>

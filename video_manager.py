@@ -329,13 +329,15 @@ class VideoManager:
         """
         return self.storage.list_channel_videos(channel_id)
 
-    def list_all_videos(self) -> list:
+    def list_all_videos(self, limit: int = 50, offset: int = 0) -> dict:
         """
-        Retrieves a list of all videos from the database.
+        Retrieves a paginated list of all videos from the database.
 
-        :return: A list of video dictionaries.
+        :param limit: Maximum number of videos to return (default: 50)
+        :param offset: Number of videos to skip (default: 0)
+        :return: A dictionary containing videos, total count, limit, and offset
         """
-        return self.storage.list_all_videos()
+        return self.storage.list_all_videos(limit=limit, offset=offset)
 
     def delete_video(self, video_id: str):
         """

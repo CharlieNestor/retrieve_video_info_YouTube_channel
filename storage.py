@@ -503,22 +503,43 @@ class SQLiteStorage:
                 print(f"Error getting videos with download status: {e}")
                 return []
 
-    def list_all_videos(self) -> List[Dict]:
+    def list_all_videos(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
         """
-        Retrieves a list of all videos from the database, sorted by publish date.
+        Retrieves a paginated list of all videos from the database, sorted by publish date.
 
-        :return: A list of dictionaries, each representing a video.
+        :param limit: Maximum number of videos to return (default: 50)
+        :param offset: Number of videos to skip (default: 0)
+        :return: A dictionary containing:
+                 - 'videos': list of video dictionaries
+                 - 'total': total count of all videos in database
+                 - 'limit': the limit used
+                 - 'offset': the offset used
         """
         with self.lock:
             cursor = self.conn.cursor()
+            
+            # Get total count
+            count_query = "SELECT COUNT(*) as total FROM videos"
+            cursor.execute(count_query)
+            total = cursor.fetchone()['total']
+            
+            # Get paginated videos
             query = """
                 SELECT id, title, channel_title, published_at, duration, thumbnail_url, downloaded
                 FROM videos
                 ORDER BY published_at DESC
+                LIMIT ? OFFSET ?
             """
-            cursor.execute(query)
+            cursor.execute(query, (limit, offset))
             rows = cursor.fetchall()
-            return [dict(row) for row in rows] if rows else []
+            videos = [dict(row) for row in rows] if rows else []
+            
+            return {
+                'videos': videos,
+                'total': total,
+                'limit': limit,
+                'offset': offset
+            }
         
     def _update_video_status(self, video_id: str, status: str) -> bool:
         """
