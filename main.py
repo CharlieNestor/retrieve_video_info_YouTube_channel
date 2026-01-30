@@ -116,7 +116,7 @@ def process_url(item: URLItem):
     """
     Processes a YouTube URL to fetch and store its metadata.
 
-    - **url**: The YouTube URL to process (channel, video, or playlist).
+    - url: The YouTube URL to process (channel, video, or playlist).
     """
     try:
         result = client.process_url(item.url)

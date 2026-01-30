@@ -1,108 +1,92 @@
 # YouTube Channel Library
 
-This is a full-stack application designed to fetch, store, and browse metadata for YouTube channels, playlists, and videos. It acts as a personal, local library for your favorite YouTube content, with a Python/FastAPI backend for data processing and a React frontend for a rich user experience.
+A full-stack application for building a personal, local library of YouTube content. Fetch and store metadata, transcripts, and video information from any YouTube channel, playlist, or video using a Python/FastAPI backend and React frontend.
 
 ## Features
 
-- **Local SQLite Library**: Fetch rich metadata via `yt-dlp` and store it locally.
-- **URL Intake**: Paste a channel, video, or playlist URL to add entries.
-- **Channel Browser UI**: Grid of channels with cached thumbnails (via image proxy).
-- **Video Details**: Views, likes, duration, publish date, tags, and description.
-- **Transcripts**: Plain text plus chapter breakdown when available.
-- **Ask the Transcript**: Chat-style Q&A over the video’s transcript.
-- **One‑click Refresh**: Update a video’s metadata and transcript on demand.
-- **Download Awareness**: See downloaded state and copy the local file path.
-
+- **URL-based intake**: Paste any YouTube URL (channel/video/playlist) to fetch and store metadata
+- **Local storage**: SQLite database with cached thumbnails and complete metadata
+- **Video transcripts**: Auto-fetched with chapter breakdown when available
+- **AI Q&A**: Ask questions about video transcripts using Google GenAI (optional)
+- **Media tracking**: Track downloads and manage local file paths
+- **Refresh on demand**: Update video metadata and transcripts as needed
 
 ## Tech Stack
 
-- **Backend**: Python, FastAPI, Uvicorn
-- **Data Retrieval**: `yt-dlp`
-- **Database**: SQLite
-- **Frontend**: React, Vite, React-Bootstrap
-- **Markdown Rendering**: `react-markdown` with `remark-gfm` for formatted LLM responses
+**Backend**: Python, FastAPI, Uvicorn, yt-dlp, SQLite  
+**Frontend**: React, Vite, React-Bootstrap
 
-## Setup
+## Installation
 
-To get the project running locally, follow these steps.
+### Prerequisites
 
-### 1. Clone the Repository
+- Python 3.8+
+- Node.js 16+
 
+### Setup Steps
+
+1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd retrieve_video_info_YouTube_channel
 ```
 
-### 2. Backend Setup
-
-From the project root directory, set up the Python virtual environment and install dependencies.
-
+2. Set up Python environment and dependencies:
 ```bash
-# Create and activate a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Install required packages
 pip install -r requirements.txt
 ```
 
-### 3. Frontend Setup
-
-Navigate to the `frontend` directory and install the Node.js dependencies.
-
+3. Install frontend dependencies:
 ```bash
 cd frontend
 npm install
+cd ..
 ```
 
 ## Configuration
 
-The application can be configured by creating a `.env` file in the root of the project directory.
+Create a `.env` file in the project root (optional):
 
-```
-# .env file
-DOWNLOAD_DIR=/path/to/your/desired/download/folder
+```bash
+DOWNLOAD_DIR=/path/to/download/folder
 GOOGLE_API_KEY=your_google_genai_api_key
 ```
 
-- **`DOWNLOAD_DIR`**: Specifies the directory where video files will be downloaded. 
-  - If this variable is not set, the application will default to using your system's standard `Downloads` folder.
-
-- **`GOOGLE_API_KEY`**: Enables the “Ask the Transcript” feature. If omitted, LLM Q&A is disabled.
-
-- **Database Location**: The SQLite database file (`youtube.db`) will be automatically created inside the download directory (either the one you specified in `DOWNLOAD_DIR` or the default `Downloads` folder).
+**Configuration details:**
+- `DOWNLOAD_DIR`: Where video files are downloaded. Defaults to system `Downloads` folder if not set.
+- `GOOGLE_API_KEY`: Required only for AI transcript Q&A feature. Can be omitted if not needed.
+- Database location: `youtube.db` is auto-created in the download directory.
 
 ## Running the Application
 
-Note: this project currently runs in two terminals (backend + frontend) because it’s still a work in progress. We plan to streamline this.
-
-This project requires two terminals running concurrently: one for the backend API and one for the frontend web server.
-
-### Terminal 1: Start the Backend
-
-Make sure you are in the project's root directory and your virtual environment is activated.
-
+1. Activate your virtual environment:
 ```bash
-# If not activated
 source .venv/bin/activate
-
-# Run the FastAPI server with Uvicorn
-uvicorn main:app --reload
 ```
 
-This will start the backend API, typically available at `http://127.0.0.1:8000`.
-
-### Terminal 2: Start the Frontend
-
-In a new terminal, navigate to the `frontend` directory.
-
+2. Start both servers:
 ```bash
-cd frontend
-
-# Run the Vite development server
-npm run dev
+python run.py
 ```
 
-This will start the React application, which will automatically open in your browser, typically at `http://localhost:5173`.
+This launches:
+- Backend API: `http://127.0.0.1:8000`
+- Frontend UI: `http://localhost:5173`
 
-Once both servers are running, you can use the web application to interact with the backend.
+3. Open `http://localhost:5173` in your browser to use the application.
+
+4. Stop both servers with `Ctrl+C`.
+
+### Troubleshooting
+
+**Port conflicts**: If ports 8000 or 5173 are already in use:
+```bash
+# Find and kill process on port 8000
+kill $(lsof -ti:8000)
+
+# Find and kill process on port 5173
+kill $(lsof -ti:5173)
+```
+
