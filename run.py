@@ -68,11 +68,7 @@ def main():
     print(f"\n[BACKEND] Starting FastAPI server on http://127.0.0.1:{backend_port}")
     try:
         backend = subprocess.Popen(
-            ["uvicorn", "main:app", "--reload"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
+            ["uvicorn", "main:app", "--reload"]
         )
         processes.append(backend)
     except FileNotFoundError:

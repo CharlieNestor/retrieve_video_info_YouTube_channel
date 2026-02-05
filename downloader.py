@@ -27,6 +27,7 @@ class MediaDownloader:
             'quiet': True,
             'no_warnings': True,    # Suppress warnings
             'extract_flat': True,   # Do not download video by default
+            #'verbose':True,
         }
 
 
@@ -617,6 +618,14 @@ class MediaDownloader:
             'progress_hooks': [self._download_hook], # Capture final path
             # Add this line to ignore playlists during download:
             'noplaylist': True,
+            # Workaround for YouTube SABR streaming issues (403 errors)
+            # Use tv_embedded or android client instead of default web client
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'tv_embedded'],  # Bypass SABR streaming
+                    'skip': ['hls', 'dash']  # Skip streaming protocols that may cause issues
+                }
+            },
             # Consider adding rate limits if needed:
             # 'limit_rate': '5M', # Limit download speed e.g., 5MB/s
         }
